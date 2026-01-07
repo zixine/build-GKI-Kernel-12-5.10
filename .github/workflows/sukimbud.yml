@@ -314,70 +314,8 @@ jobs:
           STATUS="${{ github.event.inputs.release_status }}"
           CLANG_VERSION_STRING="${{ github.event.inputs.clang_version }}"
 
-          # Hanya ada satu varian sekarang: SukiSU
-          VARIANT="SukiSU"
-
-          BUILD_DATE=$(date +"%Y%m%d")
-          KBUILD_BUILD_TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S %Z")
-          RELEASE="v${BUILD_DATE}"
-          
-          AK3_ZIP_NAME="AK3-${KERNEL_NAME}-${RELEASE}-${BASE_LINUX_VERSION}-${VARIANT}.zip"
-          
-          echo "KERNEL_NAME=$KERNEL_NAME" >> $GITHUB_ENV
-          echo "VARIANT=$VARIANT" >> $GITHUB_ENV
-          echo "STATUS=$STATUS" >> $GITHUB_ENV
-          echo "RELEASE=$RELEASE" >> $GITHUB_ENV
-          echo "AK3_ZIP_NAME=$AK3_ZIP_NAME" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_TIMESTAMP=$KBUILD_BUILD_TIMESTAMP" >> $GITHUB_ENV
-          echo "KSU=SukiSU Ultra" >> $GITHUB_ENV
-          echo "SUSFS_VERSION=$(curl -s https://gitlab.com/simonpunk/susfs4ksu/raw/gki-android12-5.10/kernel_patches/include/linux/susfs.h | grep -E '^#define SUSFS_VERSION' | cut -d' ' -f3 | sed 's/"//g')" >> $GITHUB_ENV
-          echo "COMPILER_STRING=$CLANG_VERSION_STRING" >> $GITHUB_ENV
-
-      - name: Package Kernel (AnyKernel3)
-        run: |
-          echo "🚀 Starting kernel packaging process..."
-          ANYKERNEL_REPO="https://github.com/linastorvaldz/anykernel"
-          ANYKERNEL_BRANCH="android12-5.10"
-          # Kembali ke path Image asli karena tidak ada patch KPM
-          KERNEL_IMAGE="$GITHUB_WORKSPACE/gki/out/android12-5.10/dist/Image"
-          echo "🔽 Cloning anykernel from $ANYKERNEL_REPO"
-          git clone -q --depth=1 $ANYKERNEL_REPO -b $ANYKERNEL_BRANCH anykernel
-          
-          KERNEL_STRING="${{ env.LINUX_VERSION }}"
-          sed -i "s|kernel.string=.*|kernel.string=$KERNEL_STRING|g" anykernel/anykernel.sh
-
-          cd anykernel
-          echo "🗜️ Zipping anykernel..."
-          cp "$KERNEL_IMAGE" .
-          zip -r9 ../${{ env.AK3_ZIP_NAME }} ./*
-          cd ..
-          echo "✅ Zip file created: ${{ env.AK3_ZIP_NAME }}"
-
-      - name: Create GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          echo "🚀 Creating GitHub Release..."
-          GKI_RELEASES_REPO="https://github.com/Kingfinik98/Kernel-Release"
-          REPO_PATH=$(echo "$GKI_RELEASES_REPO" | sed 's|https://github.com/||')
-          RELEASE_TAG="${{ env.KERNEL_NAME }}-${{ env.LINUX_VERSION }}-${{ env.RELEASE }}"
-          RELEASE_NOTES="🐧 *Linux Version*: ${{ env.LINUX_VERSION }}
-          📅 *Build Date*: ${{ env.KBUILD_BUILD_TIMESTAMP }}
-          📛 *SukiSU*: ${{ env.KSU }}
-          ඞ *SuSFS*: ${{ env.SUSFS_VERSION }}
-          🔰 *Compiler*: ${{ env.COMPILER_STRING }}
-          🔗 *Method*: SukiSU Ultra + SUSFS"
-          gh release create "$RELEASE_TAG" "${{ env.AK3_ZIP_NAME }}" \
-            --title "$RELEASE_TAG" \
-            --notes "$RELEASE_NOTES" \
-            --repo "$REPO_PATH" \
-            --latest
-          echo "✅ Release created successfully at https://github.com/$REPO_PATH/releases/tag/$RELEASE_TAG"
-
-      - name: Upload Build Log
-        if: always()
+      - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ github.event.inputs.performance_patch }}
-          path: gki/out/android12-5.10/common/build.log
-          if-no-files-found: warn
+          name: Image${{ github.event.inputs.kernel_name }}
+          path: gki/out/**/dist/Image

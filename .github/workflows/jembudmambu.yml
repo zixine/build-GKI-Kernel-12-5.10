@@ -114,54 +114,57 @@ jobs:
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki
 
-      - name: Integrate Root Solution (MamboSU)
+      
+      - name: Setup MamboSU & Hook Method
         working-directory: gki/common
         run: |
-          echo "🛡️ Starting MamboSU Integration..."
+          echo "🧩 Setup MamboSU (Rissu)"
           
-          # 1. Pembersihan Menyeluruh (Deep Clean)
-          DIRS_TO_CHECK="drivers/staging/kernelsu drivers/kernelsu KernelSU"
-          for DIR in $DIRS_TO_CHECK; do
-            if [ -d "$DIR" ]; then
-              PARENT=$(dirname "$DIR")
-              echo "🧹 Removing detected module at: $DIR"
-              [ -f "$PARENT/Kconfig" ] && sed -i '/kernelsu/d' "$PARENT/Kconfig"
-              [ -f "$PARENT/Makefile" ] && sed -i '/kernelsu/d' "$PARENT/Makefile"
-              rm -rf "$DIR"
+          # 1. Remove existing KernelSU drivers
+          for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
+            if [ -d $KSU_PATH ]; then
+              echo "MamboSU driver found in $KSU_PATH, Removing..."
+              KSU_DIR=$(dirname "$KSU_PATH")
+              [ -f "$KSU_DIR/Kconfig" ] && sed -i '/kernelsu/d' $KSU_DIR/Kconfig
+              [ -f "$KSU_DIR/Makefile" ] && sed -i '/kernelsu/d' $KSU_DIR/Makefile
+              rm -rf $KSU_PATH
             fi
           done
+          echo "✅ Existing MamboSU drivers removed"
           
-          # 2. Instalasi Berdasarkan Varian
-          ROOT_VARIANT="${{ github.event.inputs.hook_method }}"
+          # 2. Setup KernelSU method
+          HOOK_METHOD="${{ github.event.inputs.hook_method }}"
           
-          if [ "$ROOT_VARIANT" = "susfs" ]; then
-             echo "📥 Fetching: SuSFS Variant (rsuntk)"
+          if [ "$HOOK_METHOD" = "susfs" ]; then
+             echo "➡️ Mode: SuSFS (Using rsuntk/KernelSU setup -> branch susfs-rksu-master)"
              curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s susfs-rksu-master
           else
-             echo "📥 Fetching: Kprobes Variant (RapliVx)"
+             echo "➡️ Mode: Kprobes/Rissu (Using RapliVx/KernelSU setup -> branch master)"
              curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/master/kernel/setup.sh" | bash -s master
           fi
           
-          # 3. Patch Manager Support
-          echo "🩹 Applying Manager Capability Patch..."
-          PATCH_URL="https://raw.githubusercontent.com/Kingfinik98/gki-builder/15ddb8c469eab27491d5bb0f8f66b7fe2c15d0d7/kernel-patches/ksu/rksu-add-mambosu-manager-support.patch"
-          curl -LSs "$PATCH_URL" -o /tmp/mgr.patch
-          cd KernelSU && patch -p1 < /tmp/mgr.patch && cd ..
+          # 3. Apply Manager Support Patch manager MamboSU
+          echo "🛠️ Applying MamboSU Manager Support Patch..."
+          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/15ddb8c469eab27491d5bb0f8f66b7fe2c15d0d7/kernel-patches/ksu/rksu-add-mambosu-manager-support.patch" -o /tmp/rksu_manager.patch
+          cd KernelSU
+          patch -p1 < /tmp/rksu_manager.patch
+          cd ..
+          echo "✅ Manager Patch Applied"
           
-          # 4. Integrasi Core SusFS
-          if [ "$ROOT_VARIANT" = "susfs" ]; then
-             echo "📦 Cloning & Patching SusFS Core..."
-             git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus_repo
-             SUS_PATH=sus_repo/kernel_patches
-             
-             cp -r $SUS_PATH/fs .
-             cp -r $SUS_PATH/include .
-             cp -r $SUS_PATH/50_add_susfs_in_gki-android12-5.10.patch .
-             
+          # 4. Apply SusFS (Kernel Side) 
+          if [ "$HOOK_METHOD" = "susfs" ]; then
+             echo "➡️ Applying SusFS Kernel Patches (Simonpunk)..."
+             git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+             rm -rf sus/.git
+             susfs=sus/kernel_patches
+             cp -r $susfs/fs .
+             cp -r $susfs/include .
+             cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
              patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-             rm -rf sus_repo
-             echo "✅ SusFS Core Active."
+             echo "[✓] SUSFS patched"
           fi
+          
+          echo "✅ MamboSU & Hook Method Setup Complete"
 
       - name: Apply Critical Fixes
         working-directory: gki/common

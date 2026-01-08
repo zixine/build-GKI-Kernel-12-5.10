@@ -122,30 +122,88 @@ jobs:
           sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
           sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
 
-      - name: Inject Config
+      - name: Configure Kernel Jembuder
         working-directory: gki/common
         run: |
-          CONFIG="arch/arm64/configs/gki_defconfig"
+          TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
+          ROOT_VARIANT="${{ github.event.inputs.hook_method }}"
+          SOC_PROFILE="${{ matrix.profile }}" # <-- Menggunakan Matrix Profile
           
-          # KSU Base
-          echo -e "CONFIG_KSU=y\nCONFIG_KPM=y\nCONFIG_KPROBES=y" >> $CONFIG
+          echo "⚙️ Injecting Configuration for $SOC_PROFILE..."
           
-          # Variant Config
-          if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
-             echo -e "CONFIG_KSU_SUSFS=y\nCONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y\nCONFIG_KSU_SUSFS_SUS_PATH=y\nCONFIG_KSU_SUSFS_SUS_MOUNT=y\nCONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y\nCONFIG_KSU_SUSFS_SUS_KSTAT=y\nCONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y\nCONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y\nCONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y\nCONFIG_KSU_SUSFS_SPOOF_UNAME=y\nCONFIG_KSU_SUSFS_ENABLE_LOG=y\nCONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y\nCONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y\nCONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> $CONFIG
+          # --- Base Config ---
+          cat >> $TARGET_CONFIG <<EOF
+          CONFIG_KSU=y
+          CONFIG_KPM=y
+          CONFIG_KSU_SUSFS_SUS_SU=n
+          CONFIG_KSU_SYSCALL_HOOK=n
+          CONFIG_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          EOF
+          
+          # --- Variant Specific ---
+          if [ "$ROOT_VARIANT" = "susfs" ]; then
+            cat >> $TARGET_CONFIG <<EOF
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=n
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=n
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_MANUAL_HOOK=n
+          CONFIG_KSU_HAS_MANUAL_HOOK=n
+          EOF
           else
-             echo "CONFIG_KSU_SUSFS=n" >> $CONFIG
+            echo "CONFIG_KSU_SUSFS=n" >> $TARGET_CONFIG
+            echo "CONFIG_KSU_MANUAL_HOOK=n" >> $TARGET_CONFIG
+            echo "CONFIG_KSU_HAS_MANUAL_HOOK=n" >> $TARGET_CONFIG
           fi
           
-          # SoC Config (Matrix)
-          if [ "${{ matrix.profile }}" = "MediaTek" ]; then
-             echo "CONFIG_HZ=500" >> $CONFIG
-          elif [ "${{ matrix.profile }}" = "Universal" ]; then
-             echo -e "CONFIG_HZ_300=y\nCONFIG_CPU_FREQ=y\nCONFIG_HIGH_RES_TIMERS=y" >> $CONFIG
+          # --- SoC Tuning (Matrix Based) ---
+          if [ "$SOC_PROFILE" = "MediaTek" ]; then
+            echo "CONFIG_HZ=300" >> $TARGET_CONFIG
+          elif [ "$SOC_PROFILE" = "Universal" ]; then
+             cat >> $TARGET_CONFIG <<EOF
+          CONFIG_HZ_300=y
+          CONFIG_CPU_FREQ=y
+          CONFIG_HIGH_RES_TIMERS=y
+          EOF
           fi
           
-          # Optimization
-          echo -e "CONFIG_TCP_CONG_BBR=y\nCONFIG_DEFAULT_BBR=y\nCONFIG_ZRAM=y" >> $CONFIG
+          # --- General Optimization ---
+          cat >> $TARGET_CONFIG <<EOF
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_IP_NF_TARGET_TTL=y
+          CONFIG_IP6_NF_TARGET_HL=y
+          CONFIG_IP6_NF_MATCH_HL=y
+          CONFIG_TCP_CONG_ADVANCED=y
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_NET_SCH_FQ=y
+          CONFIG_TCP_CONG_BIC=n
+          CONFIG_TCP_CONG_WESTWOOD=n
+          CONFIG_TCP_CONG_HTCP=n
+          CONFIG_DEFAULT_BBR=y
+          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+          CONFIG_SCHED_TUNE=y
+          CONFIG_MQ_IOSCHED_KYBER=y
+          CONFIG_MQ_IOSCHED_BFQ=y
+          CONFIG_IOSCHED_BFQ=y
+          CONFIG_BFQ_GROUP_IOSCHED=y
+          CONFIG_ZRAM=y
+          CONFIG_ZRAM_WRITEBACK=y
+          EOF
 
       - name: Setup Compiler
         working-directory: gki
@@ -165,7 +223,7 @@ jobs:
         run: LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       # =========================================================
-      # 📦 PACKAGING DENGAN CUSTOM ANYKERNEL & UPLOAD KE REPO LAIN
+      #  PACKAGING DENGAN CUSTOM ANYKERNEL & UPLOAD KE REPO LAIN
       # =========================================================
       
       - name: Packaging & Release
@@ -205,7 +263,6 @@ jobs:
           cd ..
           
           # 4. UPLOAD KE REPOSITORY RELEASE (CROSS-REPO)
-          # GANTI 'Kingfinik98/Kernel-Release' DENGAN NAMA REPO RELEASE KAMU
           TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
           RELEASE_TAG="${KNAME}-${DATE}"
           

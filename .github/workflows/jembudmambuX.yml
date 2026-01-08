@@ -219,7 +219,7 @@ jobs:
           
           # --- SoC Tuning (Matrix Based) ---
           if [ "$SOC_PROFILE" = "MediaTek" ]; then
-            echo "CONFIG_HZ=500" >> $TARGET_CONFIG
+            echo "CONFIG_HZ=300" >> $TARGET_CONFIG
           elif [ "$SOC_PROFILE" = "Universal" ]; then
              cat >> $TARGET_CONFIG <<EOF
           CONFIG_HZ_300=y

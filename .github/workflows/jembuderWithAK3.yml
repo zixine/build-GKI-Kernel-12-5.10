@@ -6,7 +6,7 @@ on:
       kernel_name:
         description: 'Nama Kernel'
         required: false
-        default: 'Zixine'
+        default: ''
         type: string
       release_status:
         description: 'Status Rilis'

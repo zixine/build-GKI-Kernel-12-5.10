@@ -110,8 +110,6 @@ jobs:
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki
 
-      
-
       - name: Setup KernelSU-Next & Hook Method
         working-directory: gki/common
         run: |

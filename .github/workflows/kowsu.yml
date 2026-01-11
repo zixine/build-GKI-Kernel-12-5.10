@@ -343,7 +343,7 @@ jobs:
           if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then TAG="SusFS"; else TAG="Kprobes"; fi
           
           # Nama File Akhir
-          ZIP_NAME="AK3-KernelSu-Next-${KNAME}-${{ matrix.profile }}-${DATE}-${BASE_VER}-${TAG}.zip"
+          ZIP_NAME="AK3-kowsu-${KNAME}-${{ matrix.profile }}-${DATE}-${BASE_VER}-${TAG}.zip"
           
           # 2. CLONE CUSTOM ANYKERNEL KAMU
           # GANTI URL DI BAWAH INI DENGAN LINK REPO ANYKERNEL KAMU SENDIRI

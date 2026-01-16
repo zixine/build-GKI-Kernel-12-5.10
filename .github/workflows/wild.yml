@@ -252,12 +252,12 @@ jobs:
           BUILD_TAG=""
 
           [ -n "$NAME_INPUT" ] && BUILD_TAG="-$NAME_INPUT"
-          [ "$ROOT_VARIANT" = "susfs" ] && BUILD_TAG="$BUILD_TAG-ඞ"
+          [ "$ROOT_VARIANT" = "susfs" ] && BUILD_TAG="$BUILD_TAG-"
 
           case "$SOC_PROFILE" in
-            "Snapdragon") BUILD_TAG="$BUILD_TAG-Qcom" ;;
-            "MediaTek")   BUILD_TAG="$BUILD_TAG-Mtk" ;;
-            "Universal")  BUILD_TAG="$BUILD_TAG-Univ" ;;
+            "Snapdragon") BUILD_TAG="-Qcom" ;;
+            "MediaTek")   BUILD_TAG="-Mtk" ;;
+            "Universal")  BUILD_TAG="-Univ" ;;
           esac
           
           echo "🏷️ Final Version Suffix: $BUILD_TAG"

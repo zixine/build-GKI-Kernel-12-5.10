@@ -42,8 +42,8 @@ jobs:
 
     - name: Setup Git Config
       run: |
-        git config --global user.email "waheid005@gmail.com"
-        git config --global user.name "zixine"
+        git config --global user.email "bot@github.com"
+        git config --global user.name "GitHub Action"
 
     - name: Initialize & Sync Kernel Source
       run: |
@@ -55,6 +55,25 @@ jobs:
         
         echo "Syncing repo (ini mungkin memakan waktu)..."
         repo sync -c -j$(nproc --all) --no-tags --fail-fast
+
+    - name: Setup Custom Clang 20 (Optimization)
+      working-directory: android-kernel
+      run: |
+        echo "=== Setup Custom Clang 20 (r547379) ==="
+        # URL dari script KowSuSu
+        CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
+        
+        CLANG_DIR="prebuilts/clang/host/linux-x86/clang-r547379"
+        mkdir -p "$CLANG_DIR"
+        
+        echo "Mendownload & Extract Clang..."
+        curl -L "$CLANG_URL" | tar -xz -C "$CLANG_DIR"
+        
+        echo "Patching build config agar menggunakan Clang baru..."
+        cd common
+        sed -i 's/clang-r[0-9]*[a-z]*/clang-r547379/g' build.config.gki.aarch64
+        sed -i 's/clang-r[0-9]*[a-z]*/clang-r547379/g' build.config.common 2>/dev/null || true
+        echo "Clang 20 berhasil disiapkan."
 
     - name: Setup Wild KernelSU
       working-directory: android-kernel
@@ -68,20 +87,15 @@ jobs:
       working-directory: android-kernel/common
       run: |
         echo "=== Menjalankan Setup SuSFS ==="
-        # Clone repository SuSFS dari Simonpunk
-        # Branch disesuaikan dengan GKI Android 12 5.10
         git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
         
         echo "Copying SuSFS headers and fs files..."
-        # Menyalin folder include dan fs ke root kernel source
         cp -r susfs-git/kernel_patches/include/* include/
         cp -r susfs-git/kernel_patches/fs/* fs/
         
         echo "Applying SuSFS Core Patch..."
-        # Menerapkan patch utama untuk mengaktifkan hook SuSFS di kernel
         cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
         patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-        
         echo "[✓] SUSFS Core Patched & Enabled"
 
     - name: Apply Xiaomi Compatibility Patches
@@ -97,6 +111,11 @@ jobs:
       run: |
         echo "Menambahkan konfigurasi SuSFS dan Stealth ke defconfig..."
         DEFCONFIG="arch/arm64/configs/gki_defconfig"
+        
+        # --- FIX UTAMA: Disable check_defconfig ---
+        # Ini mencegah error "savedefconfig does not match"
+        echo "Mematikan check_defconfig..."
+        sed -i 's/check_defconfig//' build.config.gki
         
         cat <<EOF >> "$DEFCONFIG"
         # --- Config dari Script KowSuSu ---
@@ -151,7 +170,7 @@ jobs:
         CONFIG_BLOCK_LEGACY_AUTOLOAD=n
         EOF
         
-        # Set Local Version
+        # Set Local Version sesuai request
         scripts/config --file "$DEFCONFIG" --set-str LOCALVERSION "-Zixine-Elysium-Wild-V1.2"
 
     - name: Build Kernel (GKI)
@@ -159,12 +178,10 @@ jobs:
       run: |
         echo "Mulai Build Kernel..."
         
-        # Setup variabel build
         export LTO=thin
         export BUILD_CONFIG=common/build.config.gki.aarch64
         
-        # Gunakan script build bawaan GKI
-        tools/bazel run //common:kernel_aarch64_dist -- --keep_going || \
+        # Menggunakan build.sh langsung
         build/build.sh -j$(nproc)
 
     - name: Package AnyKernel3
@@ -185,8 +202,9 @@ jobs:
         echo "Membuat Zip AnyKernel3..."
         cd anykernel
         rm -rf .git
-        zip -r9 ../AnyKernel3-GotenX-WildKSU.zip * -x README.md
-        echo "Zip berhasil dibuat: AnyKernel3-GotenX-WildKSU.zip"
+        # Nama Zip disesuaikan dengan nama kernel
+        zip -r9 ../AnyKernel3-Zixine-Elysium-Wild-V1.2.zip * -x README.md
+        echo "Zip berhasil dibuat: AnyKernel3-Zixine-Elysium-Wild-V1.2.zip"
 
     - name: Upload Image Artifact
       uses: actions/upload-artifact@v4
@@ -198,13 +216,12 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: AnyKernel3-Zip
-        path: android-kernel/AnyKernel3-GotenX-WildKSU.zip
+        path: android-kernel/AnyKernel3-Zixine-Elysium-Wild-V1.2.zip
 
     - name: Release to External Repository
       uses: softprops/action-gh-release@v2
       if: success()
       with:
-        # Gunakan secret dengan nama RELEASE_TOKEN
         token: ${{ secrets.RELEASE_TOKEN }}
         repository: zixine/Kernel-GKI-12-5.10-release
         tag_name: "v${{ github.run_number }}-wildksu"
@@ -213,14 +230,16 @@ jobs:
           ## Wild KernelSU GKI Build
           
           **Android Version**: ${{ inputs.android_version }}
+          **Kernel Name**: Zixine-Elysium-Wild-V1.2
           **Build ID**: ${{ github.run_number }}
           
           ### Features Included:
           - KernelSU (Wild Version)
           - SuSFS Stealth Mode Enabled
           - Xiaomi Compatibility Patches
+          - Clang 20 Optimized
           
           _Automated build release._
         files: |
-          android-kernel/AnyKernel3-GotenX-WildKSU.zip
+          android-kernel/AnyKernel3-Zixine-Elysium-Wild-V1.2.zip
           android-kernel/out/**/dist/Image

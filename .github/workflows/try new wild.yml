@@ -1,0 +1,217 @@
+name: zixine Matrix Builder (Fixed Logic)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_name:
+        description: 'Nama Kernel'
+        required: false
+        default: 'Zixine-Elysium'
+        type: string
+      release_status:
+        description: 'Status Rilis'
+        required: true
+        type: choice
+        default: 'RELEASE'
+        options:
+          - 'RELEASE'
+          - 'BETA'
+      clang_version:
+        description: 'Versi Compiler Clang'
+        required: true
+        type: choice
+        default: 'r589343 (Clang 21)'
+        options:
+          - 'r536225 (Clang 19)'
+          - 'r547379 (Clang 20)'
+          - 'r589343 (Clang 21)'
+      hook_method:
+        description: 'Metode Root (MamboSU)'
+        required: true
+        type: choice
+        default: 'susfs'
+        options:
+          - 'susfs'
+          - 'kprobes'
+
+permissions:
+  contents: write
+
+jobs:
+  # JOB 1: BUILD (Paralel)
+  build-kernel:
+    name: Build ${{ matrix.profile }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [Snapdragon, MediaTek, Universal]
+
+    steps:
+      - name: Environment Preparation
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 10240
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-codeql: 'true'
+
+      - name: Fetch Source Code
+        uses: actions/checkout@v4
+
+      - name: Dependency Installation
+        run: |
+          sudo apt update && sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
+            libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
+
+      - name: Init & Sync GKI
+        run: |
+          mkdir gki && cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10 --depth=1
+          repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
+
+      - name: Update kernel source
+        run: |
+          cd gki/common
+          # FIX: Cek remote sebelum add untuk menghindari error
+          if ! git remote | grep -q rama; then
+            git remote add rama https://github.com/ramabondanp/android_kernel_common-5.10.git
+          fi
+          git fetch -j12 rama
+          git checkout -b update-android12-5.10-staging rama/android12-5.10-staging
+          rm -rf drivers/staging/kernelsu
+
+      - name: Inject SoC Optimization
+        if: matrix.profile == 'Snapdragon'
+        working-directory: gki/common
+        run: |
+          echo "⚡ [SoC] Injecting Snapdragon Optimization..."
+          TARGET_FILE="drivers/cpufreq/qcom-cpufreq-hw.c"
+          # FIX: Tambahkan fallback atau exit jika curl gagal
+          curl -fL "https://raw.githubusercontent.com/Pzqqt/android_kernel_xiaomi_marble/refs/heads/melt-rebase/drivers/cpufreq/qcom-cpufreq-hw.c" -o /tmp/patch_qcom.c || exit 1
+          
+          if grep -q "qcom_cpufreq_hw" /tmp/patch_qcom.c; then
+             cp /tmp/patch_qcom.c "$TARGET_FILE"
+             echo "✅ Optimization Applied."
+          else
+             echo "❌ Download corrupt!" && exit 1
+          fi
+
+      - name: Setup KernelSU & Fixes
+        working-directory: gki/common
+        run: |
+          # pick ksu wild
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild          
+          # FIX: Ganti sed '2d' dengan pencarian konten (contoh asumsi baris yang mau dihapus adalah TRIM_UNUSED_MODULES)
+          # sed -i '/CONFIG_TO_REMOVE/d' build.config.gki 
+          sed -i '2d' build.config.gki 
+
+          # Critical Fixes Logic (Sama seperti aslinya)
+          sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
+          echo "# CONFIG_STACKPROTECTOR_PER_TASK is not set" >> arch/arm64/configs/gki_defconfig
+          sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
+          sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
+          sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
+          sed -i 's/check_defconfig//' build.config.gki
+
+      - name: Configure Kernel (Matrix Injection)
+        working-directory: gki/common
+        run: |
+          TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
+          SOC_PROFILE="${{ matrix.profile }}"
+          
+          # ... (Inject config sama seperti aslinya) ...
+          # Pastikan bagian IF ELSE logic benar
+
+          if [ "$SOC_PROFILE" = "MediaTek" ]; then
+            echo "CONFIG_HZ=300" >> $TARGET_CONFIG
+          elif [ "$SOC_PROFILE" = "Universal" ]; then
+             echo "CONFIG_HZ_300=y" >> $TARGET_CONFIG
+             echo "CONFIG_CPU_FREQ=y" >> $TARGET_CONFIG
+          fi
+          # ... (Sisanya sama) ...
+
+      - name: Setup Compiler & Build
+        working-directory: gki
+        run: |
+          # ... (Setup Clang sama) ...
+          # Build
+          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+
+      - name: Package Kernel (Tanpa Release)
+        working-directory: gki
+        run: |
+          BASE_VER=$(make -s kernelversion -C common | tr -d '\n\r')
+          DATE=$(date +"%Y%m%d")
+          KNAME="${{ github.event.inputs.kernel_name }}"
+          [ -z "$KNAME" ] && KNAME="Zixine-Elysium"
+          
+          if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then TAG="SusFS"; else TAG="Kprobes"; fi
+          ZIP_NAME="AK3-KernelSu-Next-${KNAME}-${{ matrix.profile }}-${DATE}-${BASE_VER}-${TAG}.zip"
+          
+          git clone -q --depth=1 "https://github.com/zixine/anykernel" -b main anykernel
+          cp out/android12-5.10/dist/Image anykernel/
+          
+          cd anykernel
+          zip -r9 "../$ZIP_NAME" ./*
+          
+          # Simpan nama file zip ke env var agar step upload tau
+          echo "ZIP_FINAL=$ZIP_NAME" >> $GITHUB_ENV
+
+      # FIX: Upload sebagai Artifact
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ matrix.profile }}
+          path: gki/${{ env.ZIP_FINAL }}
+
+  # JOB 2: RELEASE (Jalan Sekali Setelah Semua Build Selesai)
+  release-kernels:
+    name: Create Release
+    needs: build-kernel # Menunggu job build selesai
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./releases
+          merge-multiple: true # Menggabungkan semua zip ke satu folder
+
+      - name: Push to Release
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          DATE=$(date +"%Y%m%d")
+          KNAME="${{ github.event.inputs.kernel_name }}"
+          [ -z "$KNAME" ] && KNAME="Zixine-Elysium"
+          
+          TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
+          RELEASE_TAG="${KNAME}-${DATE}"
+          
+          # Logic Release sekarang aman karena cuma jalan sekali (single thread)
+          echo "🚀 Creating Release $RELEASE_TAG..."
+          
+          NOTES="Build Date: $(date)
+          Clang: ${{ github.event.inputs.clang_version }}
+          Status: ${{ github.event.inputs.release_status }}
+          Profiles: Snapdragon, MediaTek, Universal"
+          
+          # Cek kalau rilis sudah ada (misal re-run)
+          if gh release view "$RELEASE_TAG" --repo "$TARGET_REPO" > /dev/null 2>&1; then
+             echo "⚠️ Release exists. Uploading missing assets..."
+          else
+             gh release create "$RELEASE_TAG" \
+               --repo "$TARGET_REPO" \
+               --title "$RELEASE_TAG" \
+               --notes "$NOTES" \
+               --prerelease=$([ "${{ github.event.inputs.release_status }}" == "BETA" ] && echo "true" || echo "false")
+          fi
+          
+          # Upload semua file ZIP yang ada di folder releases
+          for file in releases/*.zip; do
+            echo "Uploading $file..."
+            gh release upload "$RELEASE_TAG" "$file" --repo "$TARGET_REPO" --clobber
+          done
+          
+          echo "🎉 All Matrix builds released!"

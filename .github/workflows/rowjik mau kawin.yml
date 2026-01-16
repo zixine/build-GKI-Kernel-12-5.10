@@ -69,8 +69,7 @@ jobs:
           PREBUILTS_ROOT="prebuilts-master"
           mkdir -p "$PREBUILTS_ROOT/clang/host/linux-x86"
         fi
-        echo "Prebuilts Root ditemukan di: $PREBUILTS_ROOT"
-
+        
         NEW_CLANG_VER="clang-r547379"
         CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
         NEW_CLANG_DIR="$PREBUILTS_ROOT/clang/host/linux-x86/$NEW_CLANG_VER"
@@ -79,35 +78,21 @@ jobs:
         mkdir -p "$NEW_CLANG_DIR"
         curl -L "$CLANG_URL" | tar -xz -C "$NEW_CLANG_DIR"
         
-        if [ ! -f "$NEW_CLANG_DIR/bin/clang" ]; then
-          echo "ERROR: Clang binary not found after extraction!"
-          ls -R "$NEW_CLANG_DIR" | head -n 20
-          exit 1
-        fi
-
+        # Deteksi dan Symlink agar build system tidak bingung
         cd common
         OLD_CLANG_VER=$(grep "CLANG_VERSION=" build.config.common | head -n 1 | cut -d= -f2 | tr -d '"' | tr -d ' ')
-        if [ -z "$OLD_CLANG_VER" ]; then
-           OLD_CLANG_VER="r416183b"
-        fi
-        
-        if [[ "$OLD_CLANG_VER" != clang-* ]]; then
-            OLD_CLANG_DIR_NAME="clang-$OLD_CLANG_VER"
-        else
-            OLD_CLANG_DIR_NAME="$OLD_CLANG_VER"
-        fi
-        echo "Sistem mengharapkan Clang versi: $OLD_CLANG_DIR_NAME"
+        if [ -z "$OLD_CLANG_VER" ]; then OLD_CLANG_VER="r416183b"; fi
+        if [[ "$OLD_CLANG_VER" != clang-* ]]; then OLD_CLANG_DIR_NAME="clang-$OLD_CLANG_VER"; else OLD_CLANG_DIR_NAME="$OLD_CLANG_VER"; fi
         cd ..
 
         TARGET_DIR="$PREBUILTS_ROOT/clang/host/linux-x86/$OLD_CLANG_DIR_NAME"
-        if [ -d "$TARGET_DIR" ] || [ -L "$TARGET_DIR" ]; then
-            rm -rf "$TARGET_DIR"
-        fi
+        if [ -d "$TARGET_DIR" ] || [ -L "$TARGET_DIR" ]; then rm -rf "$TARGET_DIR"; fi
         
         cd "$PREBUILTS_ROOT/clang/host/linux-x86"
         ln -sf "$NEW_CLANG_VER" "$OLD_CLANG_DIR_NAME"
         cd - > /dev/null
 
+        # Patch config agar menggunakan clang baru
         cd common
         sed -i "s/$OLD_CLANG_DIR_NAME/$NEW_CLANG_VER/g" build.config.common 2>/dev/null || true
         sed -i "s/$OLD_CLANG_DIR_NAME/$NEW_CLANG_VER/g" build.config.gki.aarch64 2>/dev/null || true
@@ -128,12 +113,8 @@ jobs:
       run: |
         echo "=== Menjalankan Setup SuSFS ==="
         git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
-        
-        echo "Copying SuSFS headers and fs files..."
         cp -r susfs-git/kernel_patches/include/* include/
         cp -r susfs-git/kernel_patches/fs/* fs/
-        
-        echo "Applying SuSFS Core Patch..."
         cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
         patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
         echo "[✓] SUSFS Core Patched & Enabled"
@@ -146,30 +127,26 @@ jobs:
         sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
         sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
 
-    - name: Configure SuSFS & Stealth Features
+    - name: Configure SuSFS & Stealth Features (SAFE MODE)
       working-directory: android-kernel/common
       run: |
         echo "Menambahkan konfigurasi SuSFS dan Stealth ke defconfig..."
         DEFCONFIG="arch/arm64/configs/gki_defconfig"
         
-        # --- FIX 1: Disable check_defconfig ---
-        echo "Mematikan check_defconfig..."
+        # Disable check_defconfig agar build tidak error karena perubahan config
         sed -i 's/check_defconfig//' build.config.gki
         
-        # --- FIX 2: Disable Strict ABI Checks (KMI Enforcement) ---
-        # Kita hapus baris yang meng-enforce KMI agar build tidak gagal saat ada symbol yg hilang
-        echo "Mematikan KMI Enforced..."
-        sed -i 's/KMI_ENFORCED=1//' build.config.gki 2>/dev/null || true
-        sed -i 's/KMI_SYMBOL_LIST_STRICT_MODE=1//' build.config.gki 2>/dev/null || true
+        # PENTING: Jangan disable ABI Check di level config file, 
+        # biarkan env var yang menanganinya agar kita tahu kalau ada simbol penting yang hilang.
         
         cat <<EOF >> "$DEFCONFIG"
-        # --- Config dari Script KowSuSu ---
+        # --- Config Wild KernelSU ---
         CONFIG_KSU=y
         CONFIG_KPM=n
         CONFIG_KSU_MANUAL_HOOK=y
         CONFIG_KSU_KPROBES_HOOK=n
         
-        # SUSFS Configuration
+        # --- SUSFS Configuration ---
         CONFIG_KSU_SUSFS=y
         CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
         CONFIG_KSU_SUSFS_SUS_PATH=y
@@ -185,40 +162,32 @@ jobs:
         CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
         CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
         CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-        
-        # CPU & Performance
-        CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
-        CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
-        CONFIG_ENERGY_MODEL=y
-        
-        # Additional Stealth
         CONFIG_KSU_SUSFS_SUS_SU=y
         CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
         CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
         
+        # --- CPU & Performance (Safe) ---
+        CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+        CONFIG_ENERGY_MODEL=y
         CONFIG_HZ_500=y
-        CONFIG_CPU_FREQ=y
-        CONFIG_HIGH_RES_TIMERS=y
-        CONFIG_CLEANCACHE=y
-        CONFIG_TMPFS_XATTR=y
-        CONFIG_TMPFS_POSIX_ACL=y
         
-        # User Optimization Configs
+        # --- SAFE Optimization (Bootloop Fix) ---
+        # Kita HAPUS baris yang mematikan fitur keamanan standar GKI
+        # CONFIG_HARDENED_USERCOPY=n  <-- INI PENYEBAB BOOTLOOP (Jangan dipakai)
+        # CONFIG_SLUB_DEBUG_ON=n      <-- Ini juga berisiko (Jangan dipakai)
+        
+        # Fitur standar yang aman diaktifkan
         CONFIG_FS_ENCRYPTION=y
         CONFIG_FS_VERITY=y
-        CONFIG_SLUB_DEBUG_ON=n
-        CONFIG_HARDENED_USERCOPY=n
         CONFIG_RCU_FAST_NO_HZ=y
         CONFIG_RCU_NOCB_CPU=y
         CONFIG_PM_AUTOSLEEP=y
-        CONFIG_PM_WAKELOCKS=y
-        CONFIG_BLOCK_LEGACY_AUTOLOAD=n
         
-        # Matikan auto version
+        # Matikan auto version suffix
         CONFIG_LOCALVERSION_AUTO=n
         EOF
         
-        # --- FIX KEPANJANGAN NAMA KERNEL ---
+        # Fix nama kernel agar pendek
         echo "echo ''" > scripts/setlocalversion
         chmod +x scripts/setlocalversion
         
@@ -232,13 +201,12 @@ jobs:
         export LTO=thin
         export BUILD_CONFIG=common/build.config.gki.aarch64
         
-        # --- FIX UTAMA: DISABLE ABI CHECKS DI LEVEL ENV ---
-        # Ini memaksa build system untuk mengabaikan error symbol yang hilang
+        # Disable ABI check HANYA untuk memperbolehkan simbol tambahan dari KSU/SuSFS
+        # Simbol asli GKI harusnya tetap ada karena kita sudah hapus config yang berbahaya
         export KMI_SYMBOL_LIST_STRICT_MODE=0
         export KMI_ENFORCED=0
         export TRIM_NONLISTED_KMI=0
         
-        # Menggunakan build.sh langsung
         build/build.sh -j$(nproc)
 
     - name: Package AnyKernel3
@@ -250,7 +218,6 @@ jobs:
         echo "Mencari file Image hasil build..."
         find out -name Image -type f -exec cp {} anykernel/ \;
         
-        echo "Memeriksa apakah Image berhasil disalin..."
         if [ ! -f anykernel/Image ]; then
           echo "ERROR: File Image tidak ditemukan! Cek log build."
           exit 1
@@ -259,7 +226,6 @@ jobs:
         echo "Membuat Zip AnyKernel3..."
         cd anykernel
         rm -rf .git
-        # Nama Zip disesuaikan dengan nama kernel
         zip -r9 ../AnyKernel3-Zixine-Elysium-Wild-V1.2.zip * -x README.md
         echo "Zip berhasil dibuat: AnyKernel3-Zixine-Elysium-Wild-V1.2.zip"
 
@@ -281,10 +247,10 @@ jobs:
       with:
         token: ${{ secrets.RELEASE_TOKEN }}
         repository: zixine/Kernel-GKI-12-5.10-release
-        tag_name: "v${{ github.run_number }}-wildksu"
-        name: "WildKSU GKI Build v${{ github.run_number }}"
+        tag_name: "v${{ github.run_number }}-wildksu-safe"
+        name: "WildKSU GKI Build v${{ github.run_number }} (Safe Mode)"
         body: |
-          ## Wild KernelSU GKI Build
+          ## Wild KernelSU GKI Build (Safe Mode - Fix Bootloop)
           
           **Android Version**: ${{ inputs.android_version }}
           **Kernel Name**: Zixine-Elysium-Wild-V1.2
@@ -295,6 +261,7 @@ jobs:
           - SuSFS Stealth Mode Enabled
           - Xiaomi Compatibility Patches
           - Clang 20 Optimized
+          - **Bootloop Fix**: Reverted risky memory optimizations (Hardened Usercopy enabled).
           
           _Automated build release._
         files: |

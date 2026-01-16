@@ -1,4 +1,4 @@
-name: zixine Matrix Builder (Fixed Logic)
+name: zixine Matrix Builder (Final Fix)
 
 on:
   workflow_dispatch:
@@ -55,6 +55,7 @@ jobs:
           sudo apt update && sudo apt install -y git curl build-essential bc bison flex libssl-dev \
             libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
           
+          # FIX: Install Repo Tool Manual (Wajib untuk GKI)
           mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+x ~/bin/repo
@@ -73,7 +74,7 @@ jobs:
           echo "⬇️ Syncing..."
           repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
           
-          # FAILSAFE: Pastikan folder build ada
+          # FAILSAFE: Jika build/build.sh gagal terdownload otomatis
           if [ ! -f "build/build.sh" ]; then
             echo "⚠️ build/build.sh missing! Cloning manually..."
             git clone https://android.googlesource.com/kernel/build -b common-android12-5.10 build
@@ -155,10 +156,31 @@ jobs:
           CONFIG_ZRAM_WRITEBACK=y
           EOF
 
+      # --- SOLUSI ERROR 64 KARAKTER (STEP INI WAJIB ADA) ---
+      - name: Force Short Versioning
+        working-directory: gki/common
+        run: |
+          echo "✂️ Trimming kernel version string..."
+          
+          # 1. Hapus EXTRAVERSION bawaan "Rama982..." yang kepanjangan di Makefile
+          sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -Zixine/' Makefile
+          
+          # 2. Matikan Git Hash Otomatis (-g5ea7521...) di config
+          # Hapus setting lama di defconfig
+          sed -i '/CONFIG_LOCALVERSION_AUTO/d' arch/arm64/configs/gki_defconfig
+          # Paksa matikan
+          echo "CONFIG_LOCALVERSION_AUTO=n" >> arch/arm64/configs/gki_defconfig
+          
+          # 3. Kosongkan LOCALVERSION custom jika ada
+          sed -i '/CONFIG_LOCALVERSION=/d' arch/arm64/configs/gki_defconfig
+          echo 'CONFIG_LOCALVERSION=""' >> arch/arm64/configs/gki_defconfig
+          
+          echo "✅ Version forced to be short."
+
       - name: Setup Compiler & Build
         working-directory: gki
         run: |
-          # --- PERBAIKAN: TETAP DI ROOT DIR GKI ---
+          # --- PATH COMPILER AMAN (TANPA CD GLOBAL) ---
           CLANG_DIR="prebuilts-master/clang/host/linux-x86"
           mkdir -p "$CLANG_DIR"
           
@@ -170,15 +192,14 @@ jobs:
           mkdir -p "$CLANG_DIR/$TC_TAG"
           curl -L "$TC_URL" | tar -xz -C "$CLANG_DIR/$TC_TAG"
           
-          # Buat Symlink (Tanpa CD yang mengubah global state)
+          # Buat Symlink
           rm -rf "$CLANG_DIR/clang-r563880b"
           ln -sf "$TC_TAG" "$CLANG_DIR/clang-r563880b"
           
-          # Verifikasi File Build
-          echo "📂 Checking build script location..."
+          # Verifikasi File Build ada sebelum jalan
           ls -l build/build.sh || echo "❌ Script still missing!"
           
-          # Jalankan Build (Posisi shell sekarang masih di folder 'gki')
+          # Build
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       - name: Package Kernel (Tanpa Release)
@@ -197,6 +218,7 @@ jobs:
           git clone -q --depth=1 "https://github.com/zixine/anykernel" -b main anykernel
           cp out/android12-5.10/dist/Image anykernel/
           
+          # Injeksi nama versi (sekarang sudah pendek & aman)
           sed -i "s|kernel.string=.*|kernel.string=${FULL_VER}|g" anykernel/anykernel.sh
           
           cd anykernel

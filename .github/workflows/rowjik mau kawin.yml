@@ -42,8 +42,8 @@ jobs:
 
     - name: Setup Git Config
       run: |
-        git config --global user.email "bot@github.com"
-        git config --global user.name "GitHub Action"
+        git config --global user.email "waheid005@gmail.com"
+        git config --global user.name "zixine"
 
     - name: Initialize & Sync Kernel Source
       run: |
@@ -60,19 +60,38 @@ jobs:
       working-directory: android-kernel
       run: |
         echo "=== Setup Custom Clang 20 (r547379) ==="
-        # URL dari script KowSuSu
-        CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
+        # Deteksi direktori prebuilts (bisa 'prebuilts' atau 'prebuilts-master')
+        # Kita ambil yang ada folder clang-nya
+        if [ -d "prebuilts-master/clang/host/linux-x86" ]; then
+          PREBUILTS_ROOT="prebuilts-master"
+        else
+          PREBUILTS_ROOT="prebuilts"
+        fi
+        echo "Direktori Prebuilts ditemukan di: $PREBUILTS_ROOT"
         
-        CLANG_DIR="prebuilts/clang/host/linux-x86/clang-r547379"
+        CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
+        CLANG_DIR="$PREBUILTS_ROOT/clang/host/linux-x86/clang-r547379"
         mkdir -p "$CLANG_DIR"
         
-        echo "Mendownload & Extract Clang..."
+        echo "Mendownload & Extract Clang ke $CLANG_DIR..."
         curl -L "$CLANG_URL" | tar -xz -C "$CLANG_DIR"
         
-        echo "Patching build config agar menggunakan Clang baru..."
+        echo "Membuat Symlink (Safety Fallback)..."
+        # Ini meniru logika KowSuSu.sh: link clang lama ke clang baru
+        # Agar jika build system mencari versi lama, dia diarahkan ke versi baru
+        cd "$PREBUILTS_ROOT/clang/host/linux-x86"
+        rm -rf clang-r416183b
+        ln -sf clang-r547379 clang-r416183b
+        cd - > /dev/null
+        
+        echo "Patching build config..."
         cd common
         sed -i 's/clang-r[0-9]*[a-z]*/clang-r547379/g' build.config.gki.aarch64
         sed -i 's/clang-r[0-9]*[a-z]*/clang-r547379/g' build.config.common 2>/dev/null || true
+        
+        # Simpan path clang ke env var agar step selanjutnya bisa pakai
+        echo "CLANG_ROOT=$GITHUB_WORKSPACE/android-kernel/$CLANG_DIR" >> $GITHUB_ENV
+        
         echo "Clang 20 berhasil disiapkan."
 
     - name: Setup Wild KernelSU
@@ -113,7 +132,6 @@ jobs:
         DEFCONFIG="arch/arm64/configs/gki_defconfig"
         
         # --- FIX UTAMA: Disable check_defconfig ---
-        # Ini mencegah error "savedefconfig does not match"
         echo "Mematikan check_defconfig..."
         sed -i 's/check_defconfig//' build.config.gki
         
@@ -177,6 +195,11 @@ jobs:
       working-directory: android-kernel
       run: |
         echo "Mulai Build Kernel..."
+        
+        # Tambahkan path Clang secara eksplisit ke system PATH
+        export PATH="$CLANG_ROOT/bin:$PATH"
+        echo "Using Clang from: $(which clang)"
+        clang --version
         
         export LTO=thin
         export BUILD_CONFIG=common/build.config.gki.aarch64

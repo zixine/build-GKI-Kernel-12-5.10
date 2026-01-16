@@ -1,4 +1,4 @@
-name: zixine Matrix Builder (Final Fix)
+name: zixine Matrix Builder (Fixed Logic)
 
 on:
   workflow_dispatch:
@@ -16,6 +16,7 @@ on:
         options:
           - 'RELEASE'
           - 'BETA'
+      # INPUT CLANG DIHAPUS. KITA PAKSA KE CLANG 19 DI SCRIPT.
       hook_method:
         description: 'Metode Root (MamboSU)'
         required: true
@@ -29,6 +30,7 @@ permissions:
   contents: write
 
 jobs:
+  # JOB 1: BUILD (Jalan Paralel)
   build-kernel:
     name: Build ${{ matrix.profile }}
     runs-on: ubuntu-22.04
@@ -55,7 +57,7 @@ jobs:
           sudo apt update && sudo apt install -y git curl build-essential bc bison flex libssl-dev \
             libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
           
-          # FIX: Install Repo Tool Manual (Wajib untuk GKI)
+          # FIX: Install Google Repo Tool Manual
           mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+x ~/bin/repo
@@ -74,15 +76,15 @@ jobs:
           echo "⬇️ Syncing..."
           repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
           
-          # FAILSAFE: Jika build/build.sh gagal terdownload otomatis
+          # FAILSAFE: Cek folder build
           if [ ! -f "build/build.sh" ]; then
-            echo "⚠️ build/build.sh missing! Cloning manually..."
+            echo "⚠️ build/build.sh missing! Repo sync missed it. Cloning manually..."
             git clone https://android.googlesource.com/kernel/build -b common-android12-5.10 build
           fi
 
       - name: Update kernel source
-        working-directory: gki/common
         run: |
+          cd gki/common
           if ! git remote | grep -q rama; then
             git remote add rama https://github.com/ramabondanp/android_kernel_common-5.10.git
           fi
@@ -108,10 +110,37 @@ jobs:
       - name: Setup KernelSU & Fixes
         working-directory: gki/common
         run: |
+          echo "⬇️ Installing KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
           
           sed -i '2d' build.config.gki 
 
+          # --- FIX UTAMA: SUSFS HEADER ---
+          # Kita clone dan copy header SusFS SELALU, terlepas dari metode hook.
+          # Ini mencegah error 'linux/susfs.h not found'.
+          echo "⬇️ Cloning SusFS for headers..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+          
+          echo "📂 Copying SusFS headers and fs files..."
+          # Copy folder include (berisi linux/susfs.h) ke root kernel
+          cp -r sus/kernel_patches/include .
+          # Copy folder fs (berisi logika susfs)
+          cp -r sus/kernel_patches/fs .
+          
+          HOOK_METHOD="${{ github.event.inputs.hook_method }}"
+          if [ "$HOOK_METHOD" = "susfs" ]; then
+            echo "⚡ Applying SusFS Core Patch..."
+            cp sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
+            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+            echo "[✓] SUSFS Core Patched & Enabled"
+          else
+            echo "ℹ️ Running in Kprobes mode (SusFS headers present for compatibility)"
+          fi
+          
+          # Hapus folder sampah
+          rm -rf sus
+
+          # Critical Fixes
           sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
           echo "# CONFIG_STACKPROTECTOR_PER_TASK is not set" >> arch/arm64/configs/gki_defconfig
           sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
@@ -156,48 +185,25 @@ jobs:
           CONFIG_ZRAM_WRITEBACK=y
           EOF
 
-      # --- SOLUSI ERROR 64 KARAKTER (STEP INI WAJIB ADA) ---
-      - name: Force Short Versioning
-        working-directory: gki/common
-        run: |
-          echo "✂️ Trimming kernel version string..."
-          
-          # 1. Hapus EXTRAVERSION bawaan "Rama982..." yang kepanjangan di Makefile
-          sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -Zixine/' Makefile
-          
-          # 2. Matikan Git Hash Otomatis (-g5ea7521...) di config
-          # Hapus setting lama di defconfig
-          sed -i '/CONFIG_LOCALVERSION_AUTO/d' arch/arm64/configs/gki_defconfig
-          # Paksa matikan
-          echo "CONFIG_LOCALVERSION_AUTO=n" >> arch/arm64/configs/gki_defconfig
-          
-          # 3. Kosongkan LOCALVERSION custom jika ada
-          sed -i '/CONFIG_LOCALVERSION=/d' arch/arm64/configs/gki_defconfig
-          echo 'CONFIG_LOCALVERSION=""' >> arch/arm64/configs/gki_defconfig
-          
-          echo "✅ Version forced to be short."
-
       - name: Setup Compiler & Build
         working-directory: gki
         run: |
-          # --- PATH COMPILER AMAN (TANPA CD GLOBAL) ---
-          CLANG_DIR="prebuilts-master/clang/host/linux-x86"
-          mkdir -p "$CLANG_DIR"
+          mkdir -p prebuilts-master/clang/host/linux-x86
           
+          # --- HARDCODED CLANG 19 ---
           echo "🔧 Setting up Clang 19 (r536225)..."
           TC_TAG="clang-r536225"
           TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           
-          # Download & Extract
-          mkdir -p "$CLANG_DIR/$TC_TAG"
-          curl -L "$TC_URL" | tar -xz -C "$CLANG_DIR/$TC_TAG"
+          mkdir -p prebuilts-master/clang/host/linux-x86/$TC_TAG
+          curl -L "$TC_URL" | tar -xz -C prebuilts-master/clang/host/linux-x86/$TC_TAG
           
-          # Buat Symlink
-          rm -rf "$CLANG_DIR/clang-r563880b"
-          ln -sf "$TC_TAG" "$CLANG_DIR/clang-r563880b"
+          cd prebuilts-master/clang/host/linux-x86
+          rm -rf clang-r563880b
+          ln -sf "$TC_TAG" clang-r563880b
           
-          # Verifikasi File Build ada sebelum jalan
-          ls -l build/build.sh || echo "❌ Script still missing!"
+          # Verifikasi
+          ls -l ../../../../gki/build/build.sh || echo "❌ Build script missing!"
           
           # Build
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
@@ -218,7 +224,6 @@ jobs:
           git clone -q --depth=1 "https://github.com/zixine/anykernel" -b main anykernel
           cp out/android12-5.10/dist/Image anykernel/
           
-          # Injeksi nama versi (sekarang sudah pendek & aman)
           sed -i "s|kernel.string=.*|kernel.string=${FULL_VER}|g" anykernel/anykernel.sh
           
           cd anykernel
@@ -233,6 +238,7 @@ jobs:
           name: kernel-${{ matrix.profile }}
           path: gki/${{ env.ZIP_FINAL }}
 
+  # JOB 2: RELEASE
   release-kernels:
     name: Create Release
     needs: build-kernel

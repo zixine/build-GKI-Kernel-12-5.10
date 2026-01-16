@@ -61,13 +61,12 @@ jobs:
       run: |
         echo "=== Setup Custom Clang 20 (r547379) ==="
         
-        # 1. Tentukan Root Prebuilts (prebuilts vs prebuilts-master)
+        # 1. Tentukan Root Prebuilts
         if [ -d "prebuilts-master/clang/host/linux-x86" ]; then
           PREBUILTS_ROOT="prebuilts-master"
         elif [ -d "prebuilts/clang/host/linux-x86" ]; then
           PREBUILTS_ROOT="prebuilts"
         else
-          # Fallback
           PREBUILTS_ROOT="prebuilts-master"
           mkdir -p "$PREBUILTS_ROOT/clang/host/linux-x86"
         fi
@@ -83,24 +82,19 @@ jobs:
         mkdir -p "$NEW_CLANG_DIR"
         curl -L "$CLANG_URL" | tar -xz -C "$NEW_CLANG_DIR"
         
-        # Verifikasi download
         if [ ! -f "$NEW_CLANG_DIR/bin/clang" ]; then
           echo "ERROR: Clang binary not found after extraction!"
           ls -R "$NEW_CLANG_DIR" | head -n 20
           exit 1
         fi
 
-        # 4. Deteksi Versi Clang Bawaan dari Config
-        # Kita baca file config untuk tahu versi mana yang diharapkan oleh build system
+        # 4. Deteksi Versi Clang Bawaan
         cd common
         OLD_CLANG_VER=$(grep "CLANG_VERSION=" build.config.common | head -n 1 | cut -d= -f2 | tr -d '"' | tr -d ' ')
-        
-        # Jika tidak ketemu, gunakan default umum
         if [ -z "$OLD_CLANG_VER" ]; then
            OLD_CLANG_VER="r416183b"
         fi
         
-        # Normalisasi nama folder (tambahkan prefix clang- jika perlu)
         if [[ "$OLD_CLANG_VER" != clang-* ]]; then
             OLD_CLANG_DIR_NAME="clang-$OLD_CLANG_VER"
         else
@@ -109,35 +103,22 @@ jobs:
         echo "Sistem mengharapkan Clang versi: $OLD_CLANG_DIR_NAME"
         cd ..
 
-        # 5. Lakukan Symlink (Trick System)
-        # Hapus folder clang yang diharapkan sistem, ganti dengan symlink ke clang baru kita
+        # 5. Lakukan Symlink
         TARGET_DIR="$PREBUILTS_ROOT/clang/host/linux-x86/$OLD_CLANG_DIR_NAME"
-        
         if [ -d "$TARGET_DIR" ] || [ -L "$TARGET_DIR" ]; then
-            echo "Menghapus $TARGET_DIR dan menggantinya dengan symlink ke $NEW_CLANG_VER"
             rm -rf "$TARGET_DIR"
-        else
-            echo "Folder target $TARGET_DIR tidak ada, membuat symlink baru..."
         fi
         
-        # Buat Symlink: TARGET_DIR -> NEW_CLANG_VER
-        # Kita harus masuk ke direktori parent agar symlink relatifnya benar
         cd "$PREBUILTS_ROOT/clang/host/linux-x86"
         ln -sf "$NEW_CLANG_VER" "$OLD_CLANG_DIR_NAME"
-        
-        # Verifikasi Symlink
-        ls -l "$OLD_CLANG_DIR_NAME"
         cd - > /dev/null
 
-        # 6. Patch Config (Safety Net)
-        # Update config file untuk menunjuk ke string versi baru juga
+        # 6. Patch Config
         cd common
         sed -i "s/$OLD_CLANG_DIR_NAME/$NEW_CLANG_VER/g" build.config.common 2>/dev/null || true
         sed -i "s/$OLD_CLANG_DIR_NAME/$NEW_CLANG_VER/g" build.config.gki.aarch64 2>/dev/null || true
         
-        # Simpan path bin clang ke GITHUB_ENV untuk step selanjutnya
         echo "CLANG_BIN_PATH=$GITHUB_WORKSPACE/android-kernel/$NEW_CLANG_DIR/bin" >> $GITHUB_ENV
-        
         echo "Setup Clang Selesai."
 
     - name: Setup Wild KernelSU
@@ -215,7 +196,7 @@ jobs:
         CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
         CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
         
-        CONFIG_HZ_300=y
+        CONFIG_HZ_500=y
         CONFIG_CPU_FREQ=y
         CONFIG_HIGH_RES_TIMERS=y
         CONFIG_CLEANCACHE=y
@@ -232,7 +213,16 @@ jobs:
         CONFIG_PM_AUTOSLEEP=y
         CONFIG_PM_WAKELOCKS=y
         CONFIG_BLOCK_LEGACY_AUTOLOAD=n
+        
+        # Matikan auto version agar tidak kepanjangan
+        CONFIG_LOCALVERSION_AUTO=n
         EOF
+        
+        # --- FIX KEPANJANGAN NAMA KERNEL ---
+        # Timpa script setlocalversion agar tidak menambahkan git hash (misal: -g34234...)
+        # Ini penting agar nama kernel tidak melebihi 64 karakter
+        echo "echo ''" > scripts/setlocalversion
+        chmod +x scripts/setlocalversion
         
         # Set Local Version sesuai request
         scripts/config --file "$DEFCONFIG" --set-str LOCALVERSION "-Zixine-Elysium-Wild-V1.2"
@@ -241,14 +231,7 @@ jobs:
       working-directory: android-kernel
       run: |
         echo "Mulai Build Kernel..."
-        
-        # Tambahkan path Clang secara eksplisit ke system PATH
-        # Ini memastikan 'clang' command dikenali
         export PATH="$CLANG_BIN_PATH:$PATH"
-        
-        echo "Checking Clang Version..."
-        clang --version || echo "Clang command still not found, checking symlink logic..."
-        
         export LTO=thin
         export BUILD_CONFIG=common/build.config.gki.aarch64
         

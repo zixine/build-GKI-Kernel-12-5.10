@@ -16,15 +16,7 @@ on:
         options:
           - 'RELEASE'
           - 'BETA'
-      clang_version:
-        description: 'Versi Compiler Clang'
-        required: true
-        type: choice
-        default: 'r589343 (Clang 21)'
-        options:
-          - 'r536225 (Clang 19)'
-          - 'r547379 (Clang 20)'
-          - 'r589343 (Clang 21)'
+      # INPUT CLANG DIHAPUS. KITA PAKSA KE CLANG 19 DI SCRIPT.
       hook_method:
         description: 'Metode Root (MamboSU)'
         required: true
@@ -39,8 +31,6 @@ permissions:
 
 jobs:
   # JOB 1: BUILD (Jalan Paralel)
-  # Di sini ada Clang, Source Code, dan Tools.
-  # Semua pemrosesan berat wajib selesai di sini.
   build-kernel:
     name: Build ${{ matrix.profile }}
     runs-on: ubuntu-22.04
@@ -64,19 +54,37 @@ jobs:
 
       - name: Dependency Installation
         run: |
-          sudo apt update && sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
+          sudo apt update && sudo apt install -y git curl build-essential bc bison flex libssl-dev \
             libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
+          
+          # FIX: Install Google Repo Tool Manual
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
+          echo "✅ Repo tool installed correctly"
 
       - name: Init & Sync GKI
         run: |
           mkdir gki && cd gki
+          git config --global user.name "zixine"
+          git config --global user.email "bot@zixine.com"
+          
+          echo "⬇️ Initializing Repo..."
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10 --depth=1
+          
+          echo "⬇️ Syncing..."
           repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
+          
+          # FAILSAFE: Cek folder build
+          if [ ! -f "build/build.sh" ]; then
+            echo "⚠️ build/build.sh missing! Repo sync missed it. Cloning manually..."
+            git clone https://android.googlesource.com/kernel/build -b common-android12-5.10 build
+          fi
 
       - name: Update kernel source
         run: |
           cd gki/common
-          # FIX: Cek remote agar tidak error jika dijalankan ulang
           if ! git remote | grep -q rama; then
             git remote add rama https://github.com/ramabondanp/android_kernel_common-5.10.git
           fi
@@ -90,7 +98,6 @@ jobs:
         run: |
           echo "⚡ [SoC] Injecting Snapdragon Optimization..."
           TARGET_FILE="drivers/cpufreq/qcom-cpufreq-hw.c"
-          # FIX: Tambahkan validasi download
           curl -fL "https://raw.githubusercontent.com/Pzqqt/android_kernel_xiaomi_marble/refs/heads/melt-rebase/drivers/cpufreq/qcom-cpufreq-hw.c" -o /tmp/patch_qcom.c || exit 1
           
           if grep -q "qcom_cpufreq_hw" /tmp/patch_qcom.c; then
@@ -105,7 +112,6 @@ jobs:
         run: |
           curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
           
-          # FIX: Hapus baris dengan aman (bukan pakai nomor baris)
           sed -i '2d' build.config.gki 
 
           # Critical Fixes
@@ -129,7 +135,6 @@ jobs:
              echo "CONFIG_CPU_FREQ=y" >> $TARGET_CONFIG
           fi
           
-          # General Optimization (Sama seperti asli)
           cat >> $TARGET_CONFIG <<EOF
           CONFIG_HZ=300
           CONFIG_TMPFS_XATTR=y
@@ -158,19 +163,11 @@ jobs:
         working-directory: gki
         run: |
           mkdir -p prebuilts-master/clang/host/linux-x86
-          SELECTED_VER="${{ github.event.inputs.clang_version }}"
           
-          # Logic URL Clang (Sama seperti asli)
-          if [ "$SELECTED_VER" == "r536225 (Clang 19)" ]; then
-            TC_TAG="clang-r536225"
-            TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
-          elif [ "$SELECTED_VER" == "r547379 (Clang 20)" ]; then
-            TC_TAG="clang-r547379"
-            TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
-          else
-            TC_TAG="clang-r589343"
-            TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r589343.tar.gz"
-          fi
+          # --- HARDCODED CLANG 19 ---
+          echo "🔧 Setting up Clang 19 (r536225)..."
+          TC_TAG="clang-r536225"
+          TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           
           mkdir -p prebuilts-master/clang/host/linux-x86/$TC_TAG
           curl -L "$TC_URL" | tar -xz -C prebuilts-master/clang/host/linux-x86/$TC_TAG
@@ -179,14 +176,15 @@ jobs:
           rm -rf clang-r563880b
           ln -sf "$TC_TAG" clang-r563880b
           
+          # Verifikasi
+          ls -l ../../../../gki/build/build.sh || echo "❌ Build script missing!"
+          
           # Build
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       - name: Package Kernel (Tanpa Release)
         working-directory: gki
         run: |
-          # --- LOGIC INI TETAP DI SINI KARENA BUTUH CLANG/MAKE ---
-          # Mengambil versi kernel saat ini (butuh source code & compiler environment)
           FULL_VER=$(make -s kernelversion -C common | tr -d '\n\r')
           BASE_VER=$(make -s kernelversion -C common | tr -d '\n\r')
           DATE=$(date +"%Y%m%d")
@@ -197,46 +195,34 @@ jobs:
           if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then TAG="SusFS"; else TAG="Kprobes"; fi
           ZIP_NAME="AK3-KernelSu-Next-${KNAME}-${{ matrix.profile }}-${DATE}-${BASE_VER}-${TAG}.zip"
           
-          # Clone AnyKernel
           git clone -q --depth=1 "https://github.com/zixine/anykernel" -b main anykernel
-          
-          # Masukkan Image
           cp out/android12-5.10/dist/Image anykernel/
           
-          # --- INJEKSI VERSI KE ANYKERNEL.SH ---
-          # Ini aman dijalankan di sini karena kita masih di Job Build
           sed -i "s|kernel.string=.*|kernel.string=${FULL_VER}|g" anykernel/anykernel.sh
           
-          # Zip hasilnya
           cd anykernel
-          # Pastikan permission executable
           chmod +x anykernel.sh tools/magiskboot tools/ak3-core.sh META-INF/com/google/android/update-binary
           zip -r9 "../$ZIP_NAME" ./*
           
-          # Simpan nama file zip ke env var agar step upload tau
           echo "ZIP_FINAL=$ZIP_NAME" >> $GITHUB_ENV
 
-      # FIX: Upload sebagai Artifact DULU, jangan langsung release
-      # Ini adalah jembatan antara Dapur (Build) dan Kurir (Release)
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ matrix.profile }}
           path: gki/${{ env.ZIP_FINAL }}
 
-  # JOB 2: RELEASE (Jalan Sekali Setelah Semua Build Selesai)
-  # Job ini bodoh. Tidak punya compiler. Tidak punya source code.
-  # Tugasnya cuma ambil file ZIP jadi, lalu upload ke GitHub.
+  # JOB 2: RELEASE
   release-kernels:
     name: Create Release
-    needs: build-kernel # Menunggu job build selesai
+    needs: build-kernel
     runs-on: ubuntu-22.04
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./releases
-          merge-multiple: true # Menggabungkan semua zip ke satu folder
+          merge-multiple: true
 
       - name: Push to Release
         env:
@@ -251,14 +237,11 @@ jobs:
           
           echo "🚀 Creating Release $RELEASE_TAG..."
           
-          # Kita tidak pakai 'make version' di sini karena tidak ada source code.
-          # Kita pakai input manual dari user untuk deskripsi.
           NOTES="Build Date: $(date)
-          Clang: ${{ github.event.inputs.clang_version }}
+          Clang: r536225 (Clang 19)
           Status: ${{ github.event.inputs.release_status }}
           Profiles: Snapdragon, MediaTek, Universal"
           
-          # Cek kalau rilis sudah ada (misal re-run)
           if gh release view "$RELEASE_TAG" --repo "$TARGET_REPO" > /dev/null 2>&1; then
              echo "⚠️ Release exists. Uploading missing assets..."
           else
@@ -269,8 +252,6 @@ jobs:
                --prerelease=$([ "${{ github.event.inputs.release_status }}" == "BETA" ] && echo "true" || echo "false")
           fi
           
-          # Upload semua file ZIP yang ada di folder releases
-          # Perintah ini aman, cuma butuh 'gh' CLI yang bawaan ada.
           for file in releases/*.zip; do
             echo "Uploading $file..."
             gh release upload "$RELEASE_TAG" "$file" --repo "$TARGET_REPO" --clobber

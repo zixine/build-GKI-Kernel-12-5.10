@@ -55,7 +55,7 @@ jobs:
       - name: Dependency Installation
         run: |
           sudo apt update && sudo apt install -y git curl build-essential bc bison flex libssl-dev \
-            libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
+            libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld python-is-python3
           
           # FIX: Install Google Repo Tool Manual
           mkdir -p ~/bin
@@ -76,9 +76,10 @@ jobs:
           echo "⬇️ Syncing..."
           repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
           
-          # FAILSAFE: Cek folder build
+          # FAILSAFE BRUTAL: Jika build.sh tidak ada, hapus folder 'build' dan clone ulang
           if [ ! -f "build/build.sh" ]; then
-            echo "⚠️ build/build.sh missing! Repo sync missed it. Cloning manually..."
+            echo "⚠️ build/build.sh missing! Repo sync missed it. Nuking and Cloning manually..."
+            rm -rf build
             git clone https://android.googlesource.com/kernel/build -b common-android12-5.10 build
           fi
 
@@ -116,15 +117,11 @@ jobs:
           sed -i '2d' build.config.gki 
 
           # --- FIX UTAMA: SUSFS HEADER ---
-          # Kita clone dan copy header SusFS SELALU, terlepas dari metode hook.
-          # Ini mencegah error 'linux/susfs.h not found'.
           echo "⬇️ Cloning SusFS for headers..."
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
           
           echo "📂 Copying SusFS headers and fs files..."
-          # Copy folder include (berisi linux/susfs.h) ke root kernel
           cp -r sus/kernel_patches/include .
-          # Copy folder fs (berisi logika susfs)
           cp -r sus/kernel_patches/fs .
           
           HOOK_METHOD="${{ github.event.inputs.hook_method }}"
@@ -137,7 +134,6 @@ jobs:
             echo "ℹ️ Running in Kprobes mode (SusFS headers present for compatibility)"
           fi
           
-          # Hapus folder sampah
           rm -rf sus
 
           # Critical Fixes
@@ -188,6 +184,9 @@ jobs:
       - name: Setup Compiler & Build
         working-directory: gki
         run: |
+          # Simpan posisi root GKI
+          GKI_ROOT=$(pwd)
+          
           mkdir -p prebuilts-master/clang/host/linux-x86
           
           # --- HARDCODED CLANG 19 ---
@@ -195,6 +194,7 @@ jobs:
           TC_TAG="clang-r536225"
           TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           
+          # Masuk ke folder dalam untuk ekstrak
           mkdir -p prebuilts-master/clang/host/linux-x86/$TC_TAG
           curl -L "$TC_URL" | tar -xz -C prebuilts-master/clang/host/linux-x86/$TC_TAG
           
@@ -202,8 +202,15 @@ jobs:
           rm -rf clang-r563880b
           ln -sf "$TC_TAG" clang-r563880b
           
-          # Verifikasi
-          ls -l ../../../../gki/build/build.sh || echo "❌ Build script missing!"
+          # FIX: KEMBALI KE GKI ROOT SEBELUM BUILD
+          cd "$GKI_ROOT"
+          
+          echo "📂 Current Directory: $(pwd)"
+          if [ ! -f "build/build.sh" ]; then
+             echo "❌ CRITICAL: build/build.sh NOT FOUND at $(pwd)/build/build.sh"
+             ls -R
+             exit 1
+          fi
           
           # Build
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh

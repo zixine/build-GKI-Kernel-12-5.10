@@ -6,17 +6,11 @@ on:
       kernel_name:
         description: 'Nama Kernel'
         required: false
-        default: 'Zixine-Elysium'
+        default: ''
         type: string
       clang_version:
         description: 'Versi Compiler Clang'
-        required: true
-        type: choice
-        default: 'r547379 (Clang 20)'
-        options:
-          - 'r536225 (Clang 19)'
-          - 'r547379 (Clang 20)'
-          - 'r589343 (Clang 21)'
+        default: 'clang-r416183b'
       android_version:
         description: "Versi Android Common Kernel"
         required: true
@@ -61,39 +55,29 @@ jobs:
         repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b ${{ inputs.android_version }}
         repo sync -c -j$(nproc --all) --no-tags --fail-fast
 
-    - name: Setup Compiler (Dynamic Clang)
-      working-directory: android-kernel
+    - name: Setup Compiler (Symlink Trick)
+      working-directory: gki
       run: |
-        # Logika pemilihan Clang dari script zixine
-        INPUT_VER="${{ inputs.clang_version }}"
-        if [[ "$INPUT_VER" == *"Clang 19"* ]]; then
-            TC_TAG="clang-r536225"
-            TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
-        elif [[ "$INPUT_VER" == *"Clang 21"* ]]; then
-            TC_TAG="clang-r589343"
-            TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r589343.tar.gz"
-        else
-            # Default Clang 20
-            TC_TAG="clang-r547379"
-            TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
-        fi
-
-        mkdir -p prebuilts-master/clang/host/linux-x86/$TC_TAG
-        echo "Downloading $TC_TAG..."
-        curl -L "$TC_URL" | tar -xz -C prebuilts-master/clang/host/linux-x86/$TC_TAG
-        
-        # Symlink trick
-        cd common
-        OLD_CLANG_VER=$(grep "CLANG_VERSION=" build.config.common | head -n 1 | cut -d= -f2 | tr -d '"' | tr -d ' ')
-        [ -z "$OLD_CLANG_VER" ] && OLD_CLANG_VER="r416183b"
-        [[ "$OLD_CLANG_VER" != clang-* ]] && OLD_CLANG_DIR_NAME="clang-$OLD_CLANG_VER" || OLD_CLANG_DIR_NAME="$OLD_CLANG_VER"
-        cd ..
-
-        cd prebuilts-master/clang/host/linux-x86
-        rm -rf "$OLD_CLANG_DIR_NAME"
-        ln -sf "$TC_TAG" "$OLD_CLANG_DIR_NAME"
-        
-        echo "CLANG_BIN_PATH=$GITHUB_WORKSPACE/android-kernel/prebuilts-master/clang/host/linux-x86/$TC_TAG/bin" >> $GITHUB_ENV
+          mkdir -p prebuilts-master/clang/host/linux-x86
+          
+          # 1. Versi yang KITA MAU (Stabil)
+          ACTUAL_VER="clang-r416183b"
+          ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz"
+          
+          # 2. Versi yang BUILD SYSTEM CARI (Dari Log Error)
+          EXPECTED_VER="clang-r563880b"
+          
+          echo "⬇️ Downloading Clang 12 ($ACTUAL_VER)..."
+          mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
+          curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
+          
+          # 3. TRICK: Buat Symlink 'Versi Dicari' -> 'Versi Kita'
+          echo "🔗 Symlinking $EXPECTED_VER -> $ACTUAL_VER..."
+          cd prebuilts-master/clang/host/linux-x86
+          rm -rf "$EXPECTED_VER" # Hapus jika ada folder asli/kosong
+          ln -s "$ACTUAL_VER" "$EXPECTED_VER"
+          
+          echo "✅ Compiler Ready. System thinks it's $EXPECTED_VER but it's $ACTUAL_VER."
 
     - name: Clean & Setup Wild KernelSU
       working-directory: android-kernel/common
@@ -181,9 +165,9 @@ jobs:
         
         # Cek apakah Makefile punya EXTRAVERSION, kalau ada ganti, kalau tidak tambah
         if grep -q '^EXTRAVERSION *=' Makefile; then
-          sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = -${NAME}-Wild-V1.2/" Makefile
+          sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = -${NAME}-Wild-V1.4/" Makefile
         else
-          echo "EXTRAVERSION = -${NAME}-Wild-V1.2" >> Makefile
+          echo "EXTRAVERSION = -${NAME}-Wild-V1.4" >> Makefile
         fi
 
     - name: Build Kernel

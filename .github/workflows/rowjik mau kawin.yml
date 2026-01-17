@@ -54,24 +54,33 @@ jobs:
         cd android-kernel
         repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b ${{ inputs.android_version }}
         repo sync -c -j$(nproc --all) --no-tags --fail-fast
+        
+    - name: Inject SoC Optimization
+      working-directory: gki/common
+      run: |
+          echo "[SoC] Injecting Snapdragon Optimization (Melt-Rebase)..."
+          TARGET_FILE="drivers/cpufreq/qcom-cpufreq-hw.c"
+          PATCH_SOURCE="https://raw.githubusercontent.com/Pzqqt/android_kernel_xiaomi_marble/refs/heads/melt-rebase/drivers/cpufreq/qcom-cpufreq-hw.c"
+          
+          if [ ! -f "$TARGET_FILE" ]; then
+            echo "🖕Error: Target driver not found!" && exit 1
+          fi
+          
+          curl -L "$PATCH_SOURCE" -o /tmp/patch_qcom.c
+          grep -q "qcom_cpufreq_hw" /tmp/patch_qcom.c || exit 1
+          cp /tmp/patch_qcom.c "$TARGET_FILE"
+          echo "💀💀💀Optimization Applied."
 
     - name: Setup Compiler (Symlink Trick)
       working-directory: gki
       run: |
           mkdir -p prebuilts-master/clang/host/linux-x86
-          
-          # 1. Versi yang KITA MAU (Stabil)
           ACTUAL_VER="clang-r416183b"
           ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz"
-          
-          # 2. Versi yang BUILD SYSTEM CARI (Dari Log Error)
-          EXPECTED_VER="clang-r563880b"
-          
+          EXPECTED_VER="clang-r563880b"          
           echo "⬇️ Downloading Clang 12 ($ACTUAL_VER)..."
           mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
-          curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
-          
-          # 3. TRICK: Buat Symlink 'Versi Dicari' -> 'Versi Kita'
+          curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"          
           echo "🔗 Symlinking $EXPECTED_VER -> $ACTUAL_VER..."
           cd prebuilts-master/clang/host/linux-x86
           rm -rf "$EXPECTED_VER" # Hapus jika ada folder asli/kosong

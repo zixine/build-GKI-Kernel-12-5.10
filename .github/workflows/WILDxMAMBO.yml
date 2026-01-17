@@ -6,7 +6,7 @@ on:
       kernel_name:
         description: 'Nama Dasar Kernel'
         required: false
-        default: 'Zixine'
+        default: 'Zixine-Elysium'
         type: string
       release_status:
         description: 'Status Rilis'
@@ -182,8 +182,8 @@ jobs:
           CONFIG_LOCALVERSION_AUTO=n
           EOF
 
-      # --- LOGIKA MATRIX: PENAMAAN VERSI ---
-      - name: Apply Versioning
+      # --- FIX: VERSION NAME TOO LONG (>64 CHARS) ---
+      - name: Apply Versioning (Short & Clean)
         working-directory: gki/common
         run: |
           NAME="${{ github.event.inputs.kernel_name }}"
@@ -191,20 +191,27 @@ jobs:
           
           VARIANT="${{ matrix.variant }}"
           if [ "$VARIANT" == "mambo" ]; then
-             SUFFIX="-MamboSU-V1.2"
+             SUFFIX="-Mambo"
           else
-             SUFFIX="-Wild-V1.3"
+             SUFFIX="-Wild"
           fi
           
+          # Format Baru: -Zixine-Mambo (sangat pendek)
           FINAL_TAG="-${NAME}${SUFFIX}"
           echo "🏷️ Final Version Suffix: $FINAL_TAG"
           
-          # Menggunakan sed ke Makefile agar aman dari limit char
+          # 1. Kosongkan script setlocalversion agar tidak menambah hash git/scm
+          echo "" > scripts/setlocalversion
+          
+          # 2. HAPUS EXTRAVERSION bawaan dari Makefile (Ini yang bikin panjang!)
+          # Kita ganti total baris EXTRAVERSION dengan tag kita sendiri
           if grep -q '^EXTRAVERSION *=' Makefile; then
             sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = $FINAL_TAG/" Makefile
           else
             echo "EXTRAVERSION = $FINAL_TAG" >> Makefile
           fi
+          
+          echo "✅ Version fixed: 5.10.xxx${FINAL_TAG}"
 
       - name: Setup Compiler (Clang 12)
         working-directory: gki
@@ -230,7 +237,7 @@ jobs:
         run: |
           echo "🚀 Starting Compilation for ${{ matrix.variant }}..."
           
-          # Matikan ABI check agar build lulus walau ada simbol yang hilang/berubah
+          # Matikan ABI check
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export KMI_ENFORCED=0
           export TRIM_NONLISTED_KMI=0
@@ -243,13 +250,13 @@ jobs:
           BASE_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
           
           BASE_NAME="${{ github.event.inputs.kernel_name }}"
-          [ -z "$BASE_NAME" ] && BASE_NAME="Zixine"
+          [ -z "$BASE_NAME" ] && BASE_NAME="Zixine-Elysium"
           
           VARIANT="${{ matrix.variant }}"
           if [ "$VARIANT" == "mambo" ]; then
-             V_TAG="MamboSU"
+             V_TAG="MamboSU-V1.2"
           else
-             V_TAG="Wild"
+             V_TAG="Wild-V1.3"
           fi
           
           TIMESTAMP=$(date +"%Y%m%d")

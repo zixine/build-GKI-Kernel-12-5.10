@@ -185,52 +185,64 @@ jobs:
         
         build/build.sh -j$(nproc)
 
-    - name: Package AnyKernel3
-      working-directory: android-kernel
-      run: |
-        git clone https://github.com/zixine/anykernel.git anykernel
-        
-        cp out/**/dist/Image anykernel/
-        if [ ! -f anykernel/Image ]; then
-          echo "ERROR: Image tidak ditemukan!"
-          exit 1
-        fi
-        
-        # Nama Zip Otomatis
-        KNAME="${{ inputs.kernel_name }}"
-        DATE=$(date +"%Y%m%d")
-        ZIP_NAME="AnyKernel3-${KNAME}-Wild-V1.2-${DATE}.zip"
-        
-        cd anykernel
-        rm -rf .git
-        zip -r9 "../$ZIP_NAME" * -x README.md
-        
-        # Simpan nama file ke Env
-        echo "ZIP_FILENAME=$ZIP_NAME" >> $GITHUB_ENV
-
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: Kernel-Build-Result
-        path: |
-          android-kernel/*.zip
-          android-kernel/out/**/dist/Image
-
-    - name: Release to GitHub
-      if: success()
+    - name: Packaging & Release
       env:
-        GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-      working-directory: android-kernel
+          GH_TOKEN: ${{ secrets.GH_PAT }} # Menggunakan Token PAT yang kamu buat
       run: |
-        REPO="zixine/Kernel-GKI-12-5.10-release"
-        TAG_NAME="v${{ github.run_number }}-stable"
-        ZIP_FILE="${{ env.ZIP_FILENAME }}"
-        
-        # Menggunakan 'gh' CLI (Lebih stabil dari softprops)
-        echo "Membuat Release: $TAG_NAME..."
-        gh release create "$TAG_NAME" "$ZIP_FILE" \
-           --repo "$REPO" \
-           --title "Zixine Wild KSU v${{ github.run_number }} (Stable)" \
-           --notes "Build Date: $(date)
-           Clang: ${{ inputs.clang_version }}
-           **Bootloop Fixed**: Reverted aggressive optimizations & Patched Stack Protector."
+          # 1. SETUP NAMA FILE
+          BASE_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
+          FULL_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
+          DATE=$(date +"%Y%m%d")
+          
+          KNAME="${{ github.event.inputs.kernel_name }}"
+          [ -z "$KNAME" ] && KNAME="Zixine"
+          
+          # Nama File Akhir
+          ZIP_NAME="AK3-Zixine-Wild-${KNAME}-${{ matrix.profile }}-${DATE}-${BASE_VER}-${TAG}.zip"
+          
+          # 2. CLONE CUSTOM ANYKERNEL KAMU
+          # GANTI URL DI BAWAH INI DENGAN LINK REPO ANYKERNEL KAMU SENDIRI
+          AK3_REPO="https://github.com/zixine/anykernel" 
+          git clone -q --depth=1 "$AK3_REPO" -b main anykernel
+          
+          # 3. MASUKKAN IMAGE & ZIP
+          cp gki/out/android12-5.10/dist/Image anykernel/
+          
+          # Inject versi kernel ke script (opsional, biar rapi di TWRP)
+          sed -i "s|kernel.string=.*|kernel.string=${FULL_VER}|g" anykernel/anykernel.sh
+          
+          cd anykernel
+          # Pastikan script punya izin eksekusi sebelum di-zip
+          chmod +x anykernel.sh tools/magiskboot tools/ak3-core.sh META-INF/com/google/android/update-binary
+          
+          zip -r9 "../$ZIP_NAME" ./*
+          cd ..
+          
+          # 4. UPLOAD KE REPOSITORY RELEASE (CROSS-REPO)
+          TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
+          RELEASE_TAG="${KNAME}-${DATE}"
+          
+          echo "🚀 Uploading $ZIP_NAME to $TARGET_REPO ($RELEASE_TAG)..."
+          
+          # Logic: Cek apakah Release Tag sudah ada?
+          # Jika sudah ada (misal job Snapdragon selesai duluan), kita cuma upload asset.
+          # Jika belum ada, kita buat release baru.
+          
+          if gh release view "$RELEASE_TAG" --repo "$TARGET_REPO" > /dev/null 2>&1; then
+            echo "✅ Release exists, uploading asset..."
+            gh release upload "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --clobber
+          else
+            echo "🆕 Creating new release..."
+            # Catatan Rilis
+            NOTES="Build Date: $(date)
+            Clang: ${{ github.event.inputs.clang_version }}
+            Status: ${{ github.event.inputs.release_status }}"
+            
+            gh release create "$RELEASE_TAG" "$ZIP_NAME" \
+              --repo "$TARGET_REPO" \
+              --title "$RELEASE_TAG" \
+              --notes "$NOTES" \
+              --prerelease=$([ "${{ github.event.inputs.release_status }}" == "BETA" ] && echo "true" || echo "false")
+          fi
+          
+          echo "🎉 Done: $ZIP_NAME"

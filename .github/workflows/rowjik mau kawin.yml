@@ -174,9 +174,9 @@ jobs:
         
         # Cek apakah Makefile punya EXTRAVERSION, kalau ada ganti, kalau tidak tambah
         if grep -q '^EXTRAVERSION *=' Makefile; then
-          sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = -${NAME}-Wild-V1.4/" Makefile
+          sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = -${NAME}-/" Makefile
         else
-          echo "EXTRAVERSION = -${NAME}-Wild-V1.4" >> Makefile
+          echo "EXTRAVERSION = -${NAME}-" >> Makefile
         fi
 
     - name: Build Kernel

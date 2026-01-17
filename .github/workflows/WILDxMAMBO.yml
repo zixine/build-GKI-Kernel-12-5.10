@@ -1,4 +1,4 @@
-name: zixine Matrix Builder (Mambo + Wild + Fixes)
+name: zixine Matrix Builder (Mambo + Wild + All Fixes)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       kernel_name:
         description: 'Nama Dasar Kernel'
         required: false
-        default: 'zixine-Elysium'
+        default: 'Zixine'
         type: string
       release_status:
         description: 'Status Rilis'
@@ -110,21 +110,29 @@ jobs:
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki
 
-      # --- AMBIL LOGIKA FIX DARI FILE UPLOADAN ---
-      - name: Apply Critical Bootloop Fixes
+      # --- GABUNGAN SEMUA FIX PENTING ---
+      - name: Apply ALL Critical Fixes (KSU + Xiaomi + Bootloop)
         working-directory: gki/common
         run: |
-          echo "🔧 Applying Bootloop Fixes (From Rowjik)..."
+          echo "🛠️ 1. Fixing undefined KSU symbols (ksu_init_rc_hook, etc)..."
+          if [ -f fs/read_write.c ]; then
+             sed -i '/ksu_init_rc_hook/d' fs/read_write.c
+             echo "✅ Removed ksu_init_rc_hook from fs/read_write.c"
+          fi
+          if [ -f fs/stat.c ]; then
+             sed -i '/ksu_handle_sys_newfstatat/d' fs/stat.c
+             echo "✅ Removed ksu_handle_sys_newfstatat from fs/stat.c"
+          fi
           
-          # 1. Fix Stack Protector Config (Penyebab utama Bootloop di GKI Custom)
+          echo "🔧 2. Fixing Stack Protector (Wajib untuk Xiaomi Anti-Bootloop)..."
           sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
           
-          # 2. Fix Xiaomi Compat (Symbol Version)
+          echo "🔧 3. Fixing Xiaomi Module Compat (Symbol Version)..."
           sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
           sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
           sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
           
-          # 3. Disable check_defconfig
+          echo "🧹 4. Cleaning Build Config..."
           sed -i 's/check_defconfig//' build.config.gki
 
       - name: Configure Kernel (Safe Mode)
@@ -133,9 +141,6 @@ jobs:
           TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
           
           echo "⚙️ Injecting Configuration (Safe Mode)..."
-          
-          # Konfigurasi ini diambil dari file 'rowjik mau kawin.yml'
-          # KPM dimatikan (n), Kprobes Hook dimatikan (n), Manual Hook dinyalakan (y)
           
           cat >> $TARGET_CONFIG <<EOF
           CONFIG_KSU=y
@@ -172,12 +177,12 @@ jobs:
           CONFIG_PM_AUTOSLEEP=y
           CONFIG_PM_WAKELOCKS=y
           
-          # Matikan ini untuk mencegah Bootloop!
+          # Matikan ini di config juga untuk double protection
           # CONFIG_STACKPROTECTOR_PER_TASK is not set
           CONFIG_LOCALVERSION_AUTO=n
           EOF
 
-      # --- LOGIKA MATRIX: PENAMAAN VERSI (Metode Makefile) ---
+      # --- LOGIKA MATRIX: PENAMAAN VERSI ---
       - name: Apply Versioning
         working-directory: gki/common
         run: |
@@ -194,7 +199,7 @@ jobs:
           FINAL_TAG="-${NAME}${SUFFIX}"
           echo "🏷️ Final Version Suffix: $FINAL_TAG"
           
-          # Menggunakan sed ke Makefile seperti di file 'rowjik'
+          # Menggunakan sed ke Makefile agar aman dari limit char
           if grep -q '^EXTRAVERSION *=' Makefile; then
             sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = $FINAL_TAG/" Makefile
           else
@@ -218,14 +223,14 @@ jobs:
           cd prebuilts-master/clang/host/linux-x86
           rm -rf "$EXPECTED_VER"
           ln -s "$ACTUAL_VER" "$EXPECTED_VER"
+          echo "✅ Compiler Ready."
 
-      - name: Execute Build (With Fix ABI Check)
+      - name: Execute Build
         working-directory: gki
         run: |
           echo "🚀 Starting Compilation for ${{ matrix.variant }}..."
           
-          # --- LOGIKA PENTING DARI FILE UPLOAD ---
-          # Mematikan strict ABI check agar tidak error 'undefined symbol'
+          # Matikan ABI check agar build lulus walau ada simbol yang hilang/berubah
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export KMI_ENFORCED=0
           export TRIM_NONLISTED_KMI=0
@@ -242,9 +247,9 @@ jobs:
           
           VARIANT="${{ matrix.variant }}"
           if [ "$VARIANT" == "mambo" ]; then
-             V_TAG="MamboSU-V1.2"
+             V_TAG="MamboSU"
           else
-             V_TAG="Wild-V1.3"
+             V_TAG="Wild"
           fi
           
           TIMESTAMP=$(date +"%Y%m%d")

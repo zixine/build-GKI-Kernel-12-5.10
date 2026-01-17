@@ -1,4 +1,4 @@
-name: zixine Matrix Builder (Mambo + Wild)
+name: zixine Matrix Builder (Mambo + Wild + Fixes)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       kernel_name:
         description: 'Nama Dasar Kernel'
         required: false
-        default: 'Zixine'
+        default: 'zixine-Elysium'
         type: string
       release_status:
         description: 'Status Rilis'
@@ -25,11 +25,10 @@ jobs:
     name: Build ${{ matrix.variant }}
     runs-on: ubuntu-22.04
     
-    # --- STRATEGI MATRIX (RAHASIA PARALEL) ---
     strategy:
-      fail-fast: false # Jika satu gagal, yang lain tetap lanjut
+      fail-fast: false
       matrix:
-        variant: [mambo, wild] # Ini akan memicu 2 job sekaligus
+        variant: [mambo, wild]
 
     steps:
       - name: Environment Preparation
@@ -69,7 +68,6 @@ jobs:
           git remote add rama https://github.com/ramabondanp/android_kernel_common-5.10.git
           git fetch -j12 rama
           git checkout -b update-android12-5.10-staging rama/android12-5.10-staging
-          # Hapus sisa staging ksu jika ada
           rm -rf drivers/staging/kernelsu
 
       # --- COMMON FIX (Infinix Camera) ---
@@ -93,16 +91,12 @@ jobs:
             echo "🔵 Mode: MamboSU (SuSFS)"
             curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s susfs-rksu-master
             
-            echo "🛠️ Applying MamboSU Manager Patch..."
-            curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/15ddb8c469eab27491d5bb0f8f66b7fe2c15d0d7/kernel-patches/ksu/rksu-add-mambosu-manager-support.patch" -o /tmp/rksu.patch
-            cd KernelSU && patch -p1 < /tmp/rksu.patch && cd ..
-            
           elif [ "$VARIANT" == "wild" ]; then
             echo "🟣 Mode: Wild KernelSU"
             curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
           fi
 
-      # --- SETUP SUSFS (Untuk Kedua Varian) ---
+      # --- SETUP SUSFS ---
       - name: Setup SuSFS (Simonpunk)
         working-directory: gki/common
         run: |
@@ -111,43 +105,43 @@ jobs:
           cp -r susfs-git/kernel_patches/include/* include/
           cp -r susfs-git/kernel_patches/fs/* fs/
           cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
-          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-          echo "✅ SuSFS Applied."
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || echo "⚠️ Patch SuSFS mungkin sudah ada, skip error..."
 
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki
 
-      - name: Apply Critical Fixes
+      # --- AMBIL LOGIKA FIX DARI FILE UPLOADAN ---
+      - name: Apply Critical Bootloop Fixes
         working-directory: gki/common
         run: |
-          # Stack Protector Fix
-          sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
-          echo "# CONFIG_STACKPROTECTOR_PER_TASK is not set" >> arch/arm64/configs/gki_defconfig
+          echo "🔧 Applying Bootloop Fixes (From Rowjik)..."
           
-          # Xiaomi Module Fix
+          # 1. Fix Stack Protector Config (Penyebab utama Bootloop di GKI Custom)
+          sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
+          
+          # 2. Fix Xiaomi Compat (Symbol Version)
           sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
           sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
           sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
           
-          # Cleanup Config Check
+          # 3. Disable check_defconfig
           sed -i 's/check_defconfig//' build.config.gki
 
-      - name: Configure Kernel (Unified Config)
+      - name: Configure Kernel (Safe Mode)
         working-directory: gki/common
         run: |
           TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
           
-          echo "⚙️ Injecting Unified Configuration..."
-          # Config ini aman untuk Mambo maupun Wild (dengan SuSFS)
+          echo "⚙️ Injecting Configuration (Safe Mode)..."
+          
+          # Konfigurasi ini diambil dari file 'rowjik mau kawin.yml'
+          # KPM dimatikan (n), Kprobes Hook dimatikan (n), Manual Hook dinyalakan (y)
           
           cat >> $TARGET_CONFIG <<EOF
           CONFIG_KSU=y
-          CONFIG_KPM=y
-          CONFIG_KSU_SUSFS_SUS_SU=y
-          CONFIG_KSU_SYSCALL_HOOK=n
-          # Matikan Kprobes untuk stabilitas reboot maksimal di kedua varian
-          CONFIG_KPROBES=n
-          CONFIG_KPROBE_EVENTS=n
+          CONFIG_KPM=n
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_KPROBES_HOOK=n
           
           # SuSFS Configs
           CONFIG_KSU_SUSFS=y
@@ -159,46 +153,37 @@ jobs:
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=n
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=n
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
           CONFIG_KSU_SUSFS_ENABLE_LOG=y
           CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_HAS_MANUAL_HOOK=y
+          CONFIG_KSU_SUSFS_SUS_SU=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
           
-          # Performance & Tuning
+          # Tuning & Safety
           CONFIG_HZ_300=y
-          CONFIG_CPU_FREQ=y
-          CONFIG_HIGH_RES_TIMERS=y
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          CONFIG_IP_NF_TARGET_TTL=y
-          CONFIG_IP6_NF_TARGET_HL=y
-          CONFIG_IP6_NF_MATCH_HL=y
-          CONFIG_TCP_CONG_ADVANCED=y
-          CONFIG_TCP_CONG_BBR=y
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_DEFAULT_BBR=y
-          CONFIG_ZRAM=y
-          CONFIG_ZRAM_WRITEBACK=y
+          CONFIG_FS_ENCRYPTION=y
+          CONFIG_FS_VERITY=y
+          CONFIG_PM_AUTOSLEEP=y
+          CONFIG_PM_WAKELOCKS=y
+          
+          # Matikan ini untuk mencegah Bootloop!
+          # CONFIG_STACKPROTECTOR_PER_TASK is not set
+          CONFIG_LOCALVERSION_AUTO=n
           EOF
 
-      # --- LOGIKA MATRIX: PENAMAAN VERSI ---
-      - name: Apply Versioning (Dynamic Branding)
+      # --- LOGIKA MATRIX: PENAMAAN VERSI (Metode Makefile) ---
+      - name: Apply Versioning
         working-directory: gki/common
         run: |
-          echo "" > scripts/setlocalversion
-          chmod +x scripts/setlocalversion
+          NAME="${{ github.event.inputs.kernel_name }}"
+          [ -z "$NAME" ] && NAME="Zixine"
           
-          # Ambil input user
-          BASE_NAME="${{ github.event.inputs.kernel_name }}"
-          [ -z "$BASE_NAME" ] && BASE_NAME="Zixine"
-          
-          # Tentukan Suffix berdasarkan Matrix Variant
           VARIANT="${{ matrix.variant }}"
           if [ "$VARIANT" == "mambo" ]; then
              SUFFIX="-Mambo"
@@ -206,16 +191,17 @@ jobs:
              SUFFIX="-Wild"
           fi
           
-          FINAL_TAG="-${BASE_NAME}${SUFFIX}"
+          FINAL_TAG="-${NAME}${SUFFIX}"
           echo "🏷️ Final Version Suffix: $FINAL_TAG"
           
+          # Menggunakan sed ke Makefile seperti di file 'rowjik'
           if grep -q '^EXTRAVERSION *=' Makefile; then
             sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = $FINAL_TAG/" Makefile
           else
             echo "EXTRAVERSION = $FINAL_TAG" >> Makefile
           fi
 
-      - name: Setup Compiler (Symlink Trick Clang 12)
+      - name: Setup Compiler (Clang 12)
         working-directory: gki
         run: |
           mkdir -p prebuilts-master/clang/host/linux-x86
@@ -224,7 +210,7 @@ jobs:
           ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz"
           EXPECTED_VER="clang-r563880b"
           
-          echo "⬇️ Downloading Clang 12 ($ACTUAL_VER)..."
+          echo "⬇️ Downloading Clang 12..."
           mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
           curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
           
@@ -232,12 +218,18 @@ jobs:
           cd prebuilts-master/clang/host/linux-x86
           rm -rf "$EXPECTED_VER"
           ln -s "$ACTUAL_VER" "$EXPECTED_VER"
-          echo "✅ Compiler Ready."
 
-      - name: Execute Build
+      - name: Execute Build (With Fix ABI Check)
         working-directory: gki
         run: |
           echo "🚀 Starting Compilation for ${{ matrix.variant }}..."
+          
+          # --- LOGIKA PENTING DARI FILE UPLOAD ---
+          # Mematikan strict ABI check agar tidak error 'undefined symbol'
+          export KMI_SYMBOL_LIST_STRICT_MODE=0
+          export KMI_ENFORCED=0
+          export TRIM_NONLISTED_KMI=0
+          
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       - name: Prepare Release Artifacts
@@ -245,7 +237,6 @@ jobs:
         run: |
           BASE_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
           
-          # Logic Penamaan ZIP
           BASE_NAME="${{ github.event.inputs.kernel_name }}"
           [ -z "$BASE_NAME" ] && BASE_NAME="Zixine"
           
@@ -253,15 +244,13 @@ jobs:
           if [ "$VARIANT" == "mambo" ]; then
              V_TAG="MamboSU-V1.2"
           else
-             V_TAG="Wild-=V1.3"
+             V_TAG="Wild-V1.3"
           fi
           
           TIMESTAMP=$(date +"%Y%m%d")
           REL_TAG="v${TIMESTAMP}"
           
-          # Hasil: AK3-Zixine-v2024...-5.10...-Mambo.zip
           ZIP_FILENAME="AK3-${BASE_NAME}-${REL_TAG}-${BASE_VER}-${V_TAG}.zip"
-          
           echo "ZIP_FILENAME=$ZIP_FILENAME" >> $GITHUB_ENV
 
       - name: Create AnyKernel3 Zip

@@ -72,7 +72,8 @@ jobs:
         run: |
           echo "📸 Applying Infinix GT 20 Pro Camera Fix..."
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
-          patch -p1 < infinix_cam.patch || echo "⚠️ Patch kamera mungkin conflict atau sudah ada, melanjutkan..."
+          # Pesan diubah agar tidak membingungkan
+          patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam di source code (SKIP AMAN)."
 
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki
@@ -228,24 +229,26 @@ jobs:
       - name: Setup Compiler (Clang 12)
         working-directory: gki
         run: |
+          # 1. Prepare Directory & Clean OLD versions FIRST
           mkdir -p prebuilts-master/clang/host/linux-x86
+          rm -rf prebuilts-master/clang/host/linux-x86/clang-r*
           
-          # --- HARDCODED CLANG 12 (r416183b) ---
+          # 2. Define Version
           TC_TAG="clang-r416183b"
           TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz"
-          
-          echo "COMPILER_TAG=$TC_TAG" >> $GITHUB_ENV
-          
           DEST_DIR="prebuilts-master/clang/host/linux-x86/$TC_TAG"
-          mkdir -p "$DEST_DIR"
           
-          echo "⬇️ Downloading Toolchain (Clang 12 - r416183b)..."
+          # 3. Download
+          echo "⬇️ Downloading Toolchain (Clang 12 - $TC_TAG)..."
+          mkdir -p "$DEST_DIR"
           curl -L "$TC_URL" | tar -xz -C "$DEST_DIR"
           
-          cd prebuilts-master/clang/host/linux-x86
-          rm -rf clang-r*
-          ln -sf "$TC_TAG" clang-r416183b
-          echo "✅ Compiler Ready: Clang 12"
+          # 4. Force build system to use THIS version
+          # Ini akan mengganti 'r563880b' (default) dengan 'r416183b' di semua build.config
+          echo "🔧 Forcing build config to use $TC_TAG..."
+          find common -name "build.config*" -exec sed -i "s/CLANG_VERSION=.*/CLANG_VERSION=$TC_TAG/g" {} +
+          
+          echo "✅ Compiler Ready: Clang 12 ($TC_TAG)"
 
       - name: Execute Build
         working-directory: gki

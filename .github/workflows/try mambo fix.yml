@@ -1,4 +1,4 @@
-name: zixine Kernel Builder (Infinix GT 20 Pro Fix)
+name: zixine Kernel Builder (Infinix GT 20 Pro Fix + AnyKernel)
 
 on:
   workflow_dispatch:
@@ -66,13 +66,12 @@ jobs:
           # Setup KernelSU-KowSU
           rm -rf drivers/staging/kernelsu
 
-      # --- BAGIAN BARU: INFINIX GT 20 PRO FIX ---
+      # --- INFINIX GT 20 PRO FIX ---
       - name: Apply Infinix GT 20 Pro Camera Fix
         working-directory: gki/common
         run: |
           echo "📸 Applying Infinix GT 20 Pro Camera Fix..."
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
-          # Pesan diubah agar tidak membingungkan
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam di source code (SKIP AMAN)."
 
       - name: Clean Build Config
@@ -226,29 +225,29 @@ jobs:
             echo "EXTRAVERSION = $BUILD_TAG" >> Makefile
           fi
 
-      - name: Setup Compiler (Clang 12)
+      - name: Setup Compiler (Symlink Trick)
         working-directory: gki
         run: |
-          # 1. Prepare Directory & Clean OLD versions FIRST
           mkdir -p prebuilts-master/clang/host/linux-x86
-          rm -rf prebuilts-master/clang/host/linux-x86/clang-r*
           
-          # 2. Define Version
-          TC_TAG="clang-r416183b"
-          TC_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz"
-          DEST_DIR="prebuilts-master/clang/host/linux-x86/$TC_TAG"
+          # 1. Versi yang KITA MAU (Stabil)
+          ACTUAL_VER="clang-r416183b"
+          ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz"
           
-          # 3. Download
-          echo "⬇️ Downloading Toolchain (Clang 12 - $TC_TAG)..."
-          mkdir -p "$DEST_DIR"
-          curl -L "$TC_URL" | tar -xz -C "$DEST_DIR"
+          # 2. Versi yang BUILD SYSTEM CARI (Dari Log Error)
+          EXPECTED_VER="clang-r563880b"
           
-          # 4. Force build system to use THIS version
-          # Ini akan mengganti 'r563880b' (default) dengan 'r416183b' di semua build.config
-          echo "🔧 Forcing build config to use $TC_TAG..."
-          find common -name "build.config*" -exec sed -i "s/CLANG_VERSION=.*/CLANG_VERSION=$TC_TAG/g" {} +
+          echo "⬇️ Downloading Clang 12 ($ACTUAL_VER)..."
+          mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
+          curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
           
-          echo "✅ Compiler Ready: Clang 12 ($TC_TAG)"
+          # 3. TRICK: Buat Symlink 'Versi Dicari' -> 'Versi Kita'
+          echo "🔗 Symlinking $EXPECTED_VER -> $ACTUAL_VER..."
+          cd prebuilts-master/clang/host/linux-x86
+          rm -rf "$EXPECTED_VER" # Hapus jika ada folder asli/kosong
+          ln -s "$ACTUAL_VER" "$EXPECTED_VER"
+          
+          echo "✅ Compiler Ready. System thinks it's $EXPECTED_VER but it's $ACTUAL_VER."
 
       - name: Execute Build
         working-directory: gki
@@ -284,12 +283,37 @@ jobs:
           echo "SUS_VER=$SUS_VER" >> $GITHUB_ENV
           echo "MAMBOSU_METHOD=susfs" >> $GITHUB_ENV
 
-      - name: Upload Image
+      # --- STEP BARU: PACKING ANYKERNEL3 ---
+      - name: Create AnyKernel3 Zip
+        run: |
+          echo "📦 Packaging AnyKernel3..."
+          
+          # 1. Clone Repo AnyKernel kamu
+          git clone https://github.com/zixine/anykernel AnyKernel3
+          
+          # 2. Bersihkan file sampah (.git, dll)
+          rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/.gitignore AnyKernel3/README.md
+          
+          # 3. Cari Image hasil build & Copy ke folder AnyKernel
+          IMG=$(find gki/out -type f -name "Image" | head -n 1)
+          if [ -f "$IMG" ]; then
+             echo "✅ Image found at $IMG"
+             cp "$IMG" AnyKernel3/
+          else
+             echo "❌ Image not found! Build might have failed." && exit 1
+          fi
+          
+          # 4. Zip semua isinya
+          cd AnyKernel3
+          zip -r9 "../${{ env.ZIP_FILENAME }}" * -x .git .gitignore
+          
+          echo "✅ AnyKernel Package Created: ${{ env.ZIP_FILENAME }}"
+
+      - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Image${{ github.event.inputs.kernel_name }}
-          path: gki/out/**/dist/Image
-
+          name: ${{ env.ZIP_FILENAME }}
+          path: ${{ env.ZIP_FILENAME }}
       
       - name: Archive Build Log
         if: always()

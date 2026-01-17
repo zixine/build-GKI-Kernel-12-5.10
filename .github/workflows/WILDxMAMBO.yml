@@ -191,9 +191,9 @@ jobs:
           
           VARIANT="${{ matrix.variant }}"
           if [ "$VARIANT" == "mambo" ]; then
-             SUFFIX="-Mambo"
+             SUFFIX="-MamboSU-V1.2"
           else
-             SUFFIX="-Wild"
+             SUFFIX="-Wild-V1.3"
           fi
           
           FINAL_TAG="-${NAME}${SUFFIX}"

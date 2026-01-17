@@ -45,8 +45,8 @@ jobs:
 
     - name: Setup Git Config
       run: |
-        git config --global user.email "bot@github.com"
-        git config --global user.name "Zixine Builder"
+        git config --global user.email "waheid005@gmail.com"
+        git config --global user.name "zixine"
 
     - name: Initialize & Sync Kernel Source
       run: |
@@ -70,6 +70,13 @@ jobs:
           grep -q "qcom_cpufreq_hw" /tmp/patch_qcom.c || exit 1
           cp /tmp/patch_qcom.c "$TARGET_FILE"
           echo "💀💀💀Optimization Applied."
+          
+    - name: Apply Infinix GT 20 Pro Camera Fix
+      working-directory: gki/common
+      run: |
+          echo "📸 Applying Infinix GT 20 Pro Camera Fix..."
+          curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
+          patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
 
     - name: Setup Compiler (Symlink Trick)
       working-directory: gki

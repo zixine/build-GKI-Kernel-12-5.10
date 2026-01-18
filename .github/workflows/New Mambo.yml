@@ -72,52 +72,25 @@ jobs:
           echo "📸 Applying Infinix GT 20 Pro Camera Fix..."
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
-
-      # --- SETUP MAMBOSU (RapliVx) ---
-      - name: Setup SuSFS & Fix Missing Headers
-        working-directory: gki/common
+     
+      - name: "Setup KernelSU & SUSFS"
+        working-directory: ${{ env.WORK_DIR }}/common
         run: |
-          echo "🛡️ Fetching SuSFS Resources..."
+
+          echo "Installing KernelSU (SUSFS/RKSU)..."
+          curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/susfs-rksu-master/kernel/setup.sh" | bash -s susfs-rksu-master
+
+          echo "Installing SUSFS..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
+          rm -rf sus/.git
+          cp -rf sus/kernel_patches/fs/* fs/
+          cp -rf sus/kernel_patches/include/* include/
           
-          # 1. Copy SEMUA Header SuSFS (termasuk susfs_def.h)
-          echo "📦 Copying all SuSFS headers..."
-          cp -rf susfs-git/kernel_patches/include/* include/
+          cp sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
           
-          # 2. FIX HEADER CONTENT: Tambahkan include yang kurang di susfs.h
-          # Ini FIX UTAMA untuk error 'struct kstat'
-          echo "🔧 Patching susfs.h content..."
-          SUSFS_H="include/linux/susfs.h"
-          if [ -f "$SUSFS_H" ]; then
-             sed -i '1i #include <linux/types.h>' "$SUSFS_H"
-             sed -i '1i #include <linux/stat.h>' "$SUSFS_H"
-             sed -i '1i #include <linux/fs.h>' "$SUSFS_H"
-             echo "✅ Added missing includes to $SUSFS_H"
-          fi
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
           
-          # 3. Copy Header yang sudah dipatch ke Driver Folder (Local Include)
-          mkdir -p drivers/kernelsu/linux
-          cp -rf include/linux/susfs*.h drivers/kernelsu/linux/
-          cp -rf include/linux/susfs*.h drivers/kernelsu/
-          
-          # 4. Inject Include ke supercalls.c
-          TARGET_FILE="drivers/kernelsu/supercalls.c"
-          echo "💉 Injecting headers into $TARGET_FILE..."
-          
-          if [ -f "$TARGET_FILE" ]; then
-              sed -i '/#include <linux\/susfs.h>/d' "$TARGET_FILE"
-              sed -i '/#include "susfs.h"/d' "$TARGET_FILE"
-              
-              sed -i '1i #include <linux/susfs.h>' "$TARGET_FILE"
-              sed -i '1i #include "susfs.h"' "$TARGET_FILE"
-              echo "✅ Headers injected successfully."
-          else
-              echo "❌ ERROR: $TARGET_FILE not found!"
-              exit 1
-          fi
-          
-          # 5. Copy file fs/ lainnya
-          cp -r susfs-git/kernel_patches/fs/* fs/
+          echo "[✓] SUSFS patched successfully"
 
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki

@@ -1,0 +1,296 @@
+name: zixine Kernel Builder (MamboSU - 600Hz Forced)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_name:
+        description: 'Nama Kernel'
+        required: true
+        default: 'Zixine'
+        type: string
+      release_status:
+        description: 'Status Rilis'
+        required: true
+        type: choice
+        default: 'RELEASE'
+        options:
+          - 'RELEASE'
+          - 'BETA'
+
+permissions:
+  contents: write
+
+jobs:
+  mambo-build:
+    name: Build MamboSU (600Hz)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Environment Preparation
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 10240
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Fetch Source Code
+        uses: actions/checkout@v4
+
+      - name: Initialize Git Identity
+        run: |
+          git config --global user.name "zixine-bot"
+          git config --global user.email "bot@zixine.org"
+
+      - name: Dependency Installation
+        run: |
+          sudo apt update && sudo apt upgrade -y
+          sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
+            libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
+
+      - name: Init & Sync GKI
+        run: |
+          mkdir gki && cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10 --depth=1
+          repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
+          
+      - name: Update kernel source for GKI 5.10
+        run: |
+          cd gki/common
+          git remote add rama https://github.com/ramabondanp/android_kernel_common-5.10.git
+          git fetch -j12 rama
+          git checkout -b update-android12-5.10-staging rama/android12-5.10-staging
+          rm -rf drivers/staging/kernelsu
+
+      # --- COMMON FIX (Infinix Camera) ---
+      - name: Apply Infinix GT 20 Pro Camera Fix
+        working-directory: gki/common
+        run: |
+          echo "📸 Applying Infinix GT 20 Pro Camera Fix..."
+          curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
+          patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
+
+      # --- SETUP MAMBOSU (RapliVx) ---
+      - name: Setup MamboSU (RapliVx)
+        working-directory: gki/common
+        run: |
+          echo "🧹 Membersihkan KSU lama..."
+          rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU
+          
+          echo "🔵 Mode: MamboSU (RapliVx Branch)"
+          curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/susfs-rksu-master/kernel/setup.sh" | bash -s susfs-rksu-master
+
+      # --- SETUP SUSFS & HEADERS FIX ---
+      - name: Setup SuSFS & Fix Headers
+        working-directory: gki/common
+        run: |
+          echo "🛡️ Installing SuSFS..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
+          
+          # 1. Copy file fs/ dan include/ DULUAN
+          cp -r susfs-git/kernel_patches/include/* include/
+          cp -r susfs-git/kernel_patches/fs/* fs/
+          
+          # 2. Patch Kernel
+          cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || true
+          
+          # 3. FORCE Header Copy
+          cp -rf susfs-git/kernel_patches/include/linux/susfs.h include/linux/
+          
+          # --- CRITICAL FIX: INJECT INCLUDE SUSFS.H ---
+          echo "💉 Injecting #include <linux/susfs.h> into supercalls.c..."
+          target_file="drivers/kernelsu/supercalls.c"
+          if [ -f "$target_file" ]; then
+              if ! grep -q "linux/susfs.h" "$target_file"; then
+                  sed -i '1i #include <linux/susfs.h>' "$target_file"
+              fi
+          fi
+
+      - name: Clean Build Config
+        run: sed -i '2d' gki/common/build.config.gki
+
+      # --- APPLY ALL CRITICAL FIXES ---
+      - name: Apply Critical Fixes
+        working-directory: gki/common
+        run: |
+          echo "🛠️ Fixing undefined KSU symbols..."
+          [ -f fs/read_write.c ] && sed -i '/ksu_init_rc_hook/d' fs/read_write.c
+          [ -f fs/stat.c ] && sed -i '/ksu_handle_sys_newfstatat/d' fs/stat.c
+          
+          echo "🔧 Fixing Stack Protector (Anti-Bootloop)..."
+          sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
+          
+          echo "🔧 Fixing Xiaomi Module Compat..."
+          sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
+          sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
+          sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
+
+      # --- 600Hz REPLACEMENT LOGIC ---
+      - name: Replace 300Hz with 600Hz (Force)
+        working-directory: gki/common
+        run: |
+          echo "⚡ Replacing 300Hz with 600Hz in Kernel Source..."
+          
+          KCONFIG_HZ="kernel/Kconfig.hz"
+          
+          # 1. Ubah definisi config HZ_300 menjadi HZ_600
+          sed -i 's/config HZ_300/config HZ_600/g' "$KCONFIG_HZ"
+          
+          # 2. Ubah label menu dari "300 HZ" menjadi "600 HZ"
+          sed -i 's/bool "300 HZ"/bool "600 HZ"/g' "$KCONFIG_HZ"
+          
+          # 3. Ubah mapping nilai integer di bagian bawah file
+          # Dari 'default 300 if HZ_300' menjadi 'default 600 if HZ_600'
+          sed -i 's/default 300 if HZ_300/default 600 if HZ_600/g' "$KCONFIG_HZ"
+          
+          echo "✅ 300Hz is gone. 600Hz is now the standard."
+
+      - name: Configure Kernel (Safe Mode + 600Hz)
+        working-directory: gki/common
+        run: |
+          TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
+          
+          echo "⚙️ Injecting Configuration..."
+          
+          cat >> $TARGET_CONFIG <<EOF
+          # --- KernelSU & SuSFS ---
+          CONFIG_KSU=y
+          CONFIG_KPM=n
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KSU_KPROBES_HOOK=n
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_SU=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          
+          # --- Performance (600Hz Forced) ---
+          # Kita tidak perlu matikan HZ_300 karena sudah kita rename jadi HZ_600
+          CONFIG_HZ_600=y
+          CONFIG_HZ=600
+          
+          # Preemption (Smoother UI)
+          CONFIG_PREEMPT=y
+          CONFIG_PREEMPTION=y
+          
+          # Network & IO
+          CONFIG_TCP_CONG_ADVANCED=y
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_DEFAULT_BBR=y
+          CONFIG_MQ_IOSCHED_KYBER=y
+          
+          # --- Stability & Safety ---
+          CONFIG_FS_ENCRYPTION=y
+          CONFIG_FS_VERITY=y
+          CONFIG_PM_AUTOSLEEP=y
+          CONFIG_PM_WAKELOCKS=y
+          # CONFIG_STACKPROTECTOR_PER_TASK is not set
+          CONFIG_LOCALVERSION_AUTO=n
+          EOF
+
+      # --- FIX: VERSION NAME EXACTLY AS INPUT ---
+      - name: Apply Versioning (Clean Name)
+        working-directory: gki/common
+        run: |
+          NAME="${{ github.event.inputs.kernel_name }}"
+          [ -z "$NAME" ] && NAME="Zixine"
+          
+          FINAL_TAG="-${NAME}"
+          echo "🏷️ Final Version Suffix: $FINAL_TAG"
+          
+          echo "" > scripts/setlocalversion
+          if grep -q '^EXTRAVERSION *=' Makefile; then
+            sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = $FINAL_TAG/" Makefile
+          else
+            echo "EXTRAVERSION = $FINAL_TAG" >> Makefile
+          fi
+
+      - name: Setup Compiler (Symlink Trick Clang 12)
+        working-directory: gki
+        run: |
+          mkdir -p prebuilts-master/clang/host/linux-x86
+          
+          ACTUAL_VER="clang-r416183b"
+          ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz"
+          EXPECTED_VER="clang-r563880b"
+          
+          echo "⬇️ Downloading Clang 12..."
+          mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
+          curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
+          
+          echo "🔗 Symlinking $EXPECTED_VER -> $ACTUAL_VER..."
+          cd prebuilts-master/clang/host/linux-x86
+          rm -rf "$EXPECTED_VER"
+          ln -s "$ACTUAL_VER" "$EXPECTED_VER"
+          echo "✅ Compiler Ready."
+
+      - name: Execute Build (O3 Optimized)
+        working-directory: gki
+        run: |
+          echo "🚀 Starting Compilation for MamboSU..."
+          
+          export KMI_SYMBOL_LIST_STRICT_MODE=0
+          export KMI_ENFORCED=0
+          export TRIM_NONLISTED_KMI=0
+          
+          LTO=thin KCFLAGS="-O3" BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+
+      - name: Prepare Release Artifacts
+        id: packaging_setup
+        run: |
+          BASE_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
+          BASE_NAME="${{ github.event.inputs.kernel_name }}"
+          [ -z "$BASE_NAME" ] && BASE_NAME="Zixine"
+          
+          # ZIP Filename: AK3-{NamaUser}-{VersiKernel}-600Hz.zip
+          ZIP_FILENAME="AK3-${BASE_NAME}-${BASE_VER}-600Hz.zip"
+          echo "ZIP_FILENAME=$ZIP_FILENAME" >> $GITHUB_ENV
+
+      - name: Create AnyKernel3 Zip
+        run: |
+          echo "📦 Packaging AnyKernel3..."
+          git clone https://github.com/zixine/anykernel AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/.gitignore AnyKernel3/README.md
+          
+          IMG=$(find gki/out -type f -name "Image" | head -n 1)
+          if [ -f "$IMG" ]; then
+             cp "$IMG" AnyKernel3/
+          else
+             echo "❌ Image not found!" && exit 1
+          fi
+          
+          cd AnyKernel3
+          zip -r9 "../${{ env.ZIP_FILENAME }}" * -x .git .gitignore
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_FILENAME }}
+          path: ${{ env.ZIP_FILENAME }}
+      
+      - name: Archive Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-mambo
+          path: gki/out/android12-5.10/common/build.log
+          if-no-files-found: warn

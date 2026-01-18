@@ -83,43 +83,19 @@ jobs:
           echo "🔵 Mode: MamboSU (RapliVx Branch)"
           # Menggunakan script dari RapliVx
           curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/susfs-rksu-master/kernel/setup.sh" | bash -s susfs-rksu-master
-
-      # --- SETUP SUSFS & HEADERS FIX (CRITICAL) ---
-      - name: Setup SuSFS & Fix Missing Headers
-        working-directory: gki/common
-        run: |
-          echo "🛡️ Fetching SuSFS Resources..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
-          
-          # 1. Copy Header ke System Include (Standar)
-          cp -rf susfs-git/kernel_patches/include/linux/susfs.h include/linux/
-          
-          # 2. Copy Header ke Driver Folder (Agar bisa di-include lokal)
-          cp -rf susfs-git/kernel_patches/include/linux/susfs.h drivers/kernelsu/
-          
-          # 3. Inject Include ke supercalls.c (Solusi 'implicit declaration')
-          TARGET_FILE="drivers/kernelsu/supercalls.c"
-          echo "💉 Injecting headers into $TARGET_FILE..."
-          
-          if [ -f "$TARGET_FILE" ]; then
-              # Hapus include lama biar bersih
-              sed -i '/#include <linux\/susfs.h>/d' "$TARGET_FILE"
-              sed -i '/#include "susfs.h"/d' "$TARGET_FILE"
-              
-              # Masukkan include di baris pertama
-              sed -i '1i #include <linux/susfs.h>' "$TARGET_FILE"
-              sed -i '1i #include "susfs.h"' "$TARGET_FILE"
-              
-              echo "✅ Headers injected successfully."
-              head -n 5 "$TARGET_FILE" # Debug: Tampilkan 5 baris pertama
-          else
-              echo "❌ ERROR: $TARGET_FILE not found!"
-              exit 1
+          # 4. Apply SusFS (Kernel Side) 
+          if [ "$HOOK_METHOD" = "susfs" ]; then
+             echo "➡️ Applying SusFS Kernel Patches (Simonpunk)..."
+             git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+             rm -rf sus/.git
+             susfs=sus/kernel_patches
+             cp -r $susfs/fs .
+             cp -r $susfs/include .
+             cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+             patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+             echo "[✓] SUSFS patched"
           fi
-          
-          # 4. Copy file fs/ lainnya
-          cp -r susfs-git/kernel_patches/fs/* fs/
-
+      
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki
 

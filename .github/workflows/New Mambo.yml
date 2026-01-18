@@ -1,4 +1,4 @@
-name: zixine Kernel Builder (MamboSU RapliVx - Final Fix)
+name: zixine Kernel Builder (MamboSU RapliVx - Header Dependency Fix)
 
 on:
   workflow_dispatch:
@@ -83,19 +83,48 @@ jobs:
           echo "🔵 Mode: MamboSU (RapliVx Branch)"
           # Menggunakan script dari RapliVx
           curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/susfs-rksu-master/kernel/setup.sh" | bash -s susfs-rksu-master
-          # 4. Apply SusFS (Kernel Side) 
-          if [ "$HOOK_METHOD" = "susfs" ]; then
-             echo "➡️ Applying SusFS Kernel Patches (Simonpunk)..."
-             git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-             rm -rf sus/.git
-             susfs=sus/kernel_patches
-             cp -r $susfs/fs .
-             cp -r $susfs/include .
-             cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-             patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-             echo "[✓] SUSFS patched"
+
+      # --- SETUP SUSFS & HEADERS FIX (CRITICAL) ---
+      - name: Setup SuSFS & Fix Missing Headers
+        working-directory: gki/common
+        run: |
+          echo "🛡️ Fetching SuSFS Resources..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
+          
+          # 1. Copy SEMUA Header SuSFS (Termasuk susfs_def.h)
+          # Menggunakan cp -rf * untuk menyalin rekursif semua isi folder
+          echo "📦 Copying all SuSFS headers..."
+          cp -rf susfs-git/kernel_patches/include/* include/
+          
+          # 2. Copy Header ke Driver Folder juga (Backup)
+          # Kita copy spesifik folder linux/ agar susfs_def.h terbawa
+          mkdir -p drivers/kernelsu/linux
+          cp -rf susfs-git/kernel_patches/include/linux/* drivers/kernelsu/linux/
+          # Copy juga ke root driver agar include "susfs.h" jalan
+          cp -rf susfs-git/kernel_patches/include/linux/* drivers/kernelsu/
+          
+          # 3. Inject Include ke supercalls.c
+          TARGET_FILE="drivers/kernelsu/supercalls.c"
+          echo "💉 Injecting headers into $TARGET_FILE..."
+          
+          if [ -f "$TARGET_FILE" ]; then
+              # Hapus include lama
+              sed -i '/#include <linux\/susfs.h>/d' "$TARGET_FILE"
+              sed -i '/#include "susfs.h"/d' "$TARGET_FILE"
+              
+              # Inject include baru
+              sed -i '1i #include <linux/susfs.h>' "$TARGET_FILE"
+              sed -i '1i #include "susfs.h"' "$TARGET_FILE"
+              
+              echo "✅ Headers injected successfully."
+          else
+              echo "❌ ERROR: $TARGET_FILE not found!"
+              exit 1
           fi
-      
+          
+          # 4. Copy file fs/ lainnya
+          cp -r susfs-git/kernel_patches/fs/* fs/
+
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki
 
@@ -121,14 +150,13 @@ jobs:
           sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
           sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
 
-      # --- UNLOCK 600Hz SUPPORT (REPLACE METHOD) ---
+      # --- UNLOCK 600Hz SUPPORT ---
       - name: Replace 300Hz with 600Hz (Force)
         working-directory: gki/common
         run: |
           echo "⚡ Replacing 300Hz with 600Hz in Kernel Source..."
           KCONFIG_HZ="kernel/Kconfig.hz"
           
-          # Ubah definisi config dan label
           sed -i 's/config HZ_300/config HZ_600/g' "$KCONFIG_HZ"
           sed -i 's/bool "300 HZ"/bool "600 HZ"/g' "$KCONFIG_HZ"
           sed -i 's/default 300 if HZ_300/default 600 if HZ_600/g' "$KCONFIG_HZ"
@@ -199,7 +227,6 @@ jobs:
           NAME="${{ github.event.inputs.kernel_name }}"
           [ -z "$NAME" ] && NAME="Zixine"
           
-          # Gunakan nama bersih
           FINAL_TAG="-${NAME}"
           echo "🏷️ Final Version Suffix: $FINAL_TAG"
           
@@ -240,81 +267,39 @@ jobs:
           
           LTO=thin KCFLAGS="-O3" BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
-      # --- PACKAGING & RELEASE (CUSTOM) ---
-      - name: Packaging & Release
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+      - name: Prepare Release Artifacts
+        id: packaging_setup
         run: |
-          # 1. SETUP NAMA FILE
           BASE_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
-          FULL_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
-          DATE=$(date +"%Y%m%d")
+          BASE_NAME="${{ github.event.inputs.kernel_name }}"
+          [ -z "$BASE_NAME" ] && BASE_NAME="Zixine"
           
-          KNAME="${{ github.event.inputs.kernel_name }}"
-          [ -z "$KNAME" ] && KNAME="Zixine"
-          
-          # Tag khusus MamboSU
-          TAG="MamboSu"
-          
-          # Nama File Akhir: AK3-Zixine-MamboSu-Zixine-20240118-5.10.198-MamboSu.zip
-          # Saya rapikan sedikit agar tidak double nama user
-          ZIP_NAME="AK3-Zixine-MamboSu-${KNAME}-${DATE}-${BASE_VER}.zip"
-          
-          echo "📦 Target Zip: $ZIP_NAME"
-          
-          # 2. CLONE CUSTOM ANYKERNEL
-          AK3_REPO="https://github.com/zixine/anykernel" 
-          git clone -q --depth=1 "$AK3_REPO" -b main anykernel
-          
-          # 3. MASUKKAN IMAGE & ZIP
-          # Pastikan path Image benar (biasanya di out/android12-5.10/dist/Image)
-          # Kita pakai 'find' biar aman kalau path berubah dikit
-          IMG=$(find gki/out -name "Image" -type f | head -n 1)
-          if [ -z "$IMG" ]; then
-             echo "❌ Error: Image kernel tidak ditemukan!"
-             exit 1
-          fi
-          echo "✅ Found Image: $IMG"
-          cp "$IMG" anykernel/
-          
-          # Inject versi kernel ke script (opsional)
-          sed -i "s|kernel.string=.*|kernel.string=${FULL_VER} by Zixine|g" anykernel/anykernel.sh
-          
-          cd anykernel
-          # Pastikan script punya izin eksekusi
-          chmod +x anykernel.sh tools/magiskboot tools/ak3-core.sh META-INF/com/google/android/update-binary
-          
-          zip -r9 "../$ZIP_NAME" * -x .git .gitignore README.md
-          cd ..
-          
-          # 4. UPLOAD KE REPOSITORY RELEASE (CROSS-REPO)
-          TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
-          RELEASE_TAG="${KNAME}-${DATE}-Mambo"
-          
-          echo "🚀 Uploading $ZIP_NAME to $TARGET_REPO ($RELEASE_TAG)..."
-          
-          # Cek apakah Release Tag sudah ada?
-          if gh release view "$RELEASE_TAG" --repo "$TARGET_REPO" > /dev/null 2>&1; then
-            echo "✅ Release exists, uploading asset..."
-            gh release upload "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --clobber
-          else
-            echo "🆕 Creating new release..."
-            NOTES="**Zixine MamboSU Build**
-            - Date: $(date)
-            - Kernel: $FULL_VER
-            - Status: ${{ github.event.inputs.release_status }}
-            - Tweaks: 600Hz, O3, Preempt
-            - Fixes: Header Fix, Bootloop Fix"
-            
-            gh release create "$RELEASE_TAG" "$ZIP_NAME" \
-              --repo "$TARGET_REPO" \
-              --title "Zixine MamboSU ${DATE}" \
-              --notes "$NOTES" \
-              --prerelease=$([ "${{ github.event.inputs.release_status }}" == "BETA" ] && echo "true" || echo "false")
-          fi
-          
-          echo "🎉 Done!"
+          # ZIP Filename Bersih
+          ZIP_FILENAME="AK3-${BASE_NAME}-${BASE_VER}-600Hz.zip"
+          echo "ZIP_FILENAME=$ZIP_FILENAME" >> $GITHUB_ENV
 
+      - name: Create AnyKernel3 Zip
+        run: |
+          echo "📦 Packaging AnyKernel3..."
+          git clone https://github.com/zixine/anykernel AnyKernel3
+          rm -rf AnyKernel3/.git AnyKernel3/.github AnyKernel3/.gitignore AnyKernel3/README.md
+          
+          IMG=$(find gki/out -type f -name "Image" | head -n 1)
+          if [ -f "$IMG" ]; then
+             cp "$IMG" AnyKernel3/
+          else
+             echo "❌ Image not found!" && exit 1
+          fi
+          
+          cd AnyKernel3
+          zip -r9 "../${{ env.ZIP_FILENAME }}" * -x .git .gitignore
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_FILENAME }}
+          path: ${{ env.ZIP_FILENAME }}
+      
       - name: Archive Build Log
         if: always()
         uses: actions/upload-artifact@v4

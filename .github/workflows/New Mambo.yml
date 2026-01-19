@@ -1,4 +1,4 @@
-name: zixine Kernel Builder (MamboSU RapliVx - V8 Perfected)
+name: zixine Kernel Builder (MamboSU RapliVx - V9 Perfected)
 
 on:
   workflow_dispatch:
@@ -108,7 +108,7 @@ jobs:
           mkdir -p drivers/kernelsu/linux
           cp -f "$SUSFS_H" drivers/kernelsu/susfs.h
           cp -f "$SUSFS_H" drivers/kernelsu/
-          # Copy juga susfs_def.h jika diperlukan
+          # Copy juga susfs_def.h dkk jika diperlukan
           cp -rf include/linux/susfs*.h drivers/kernelsu/linux/
           
           # 4. Inject Include ke supercalls.c (Solusi implicit declaration)
@@ -124,6 +124,10 @@ jobs:
               sed -i '1i #include "susfs.h"' "$TARGET_FILE"
               
               echo "✅ Headers injected successfully."
+              
+              # DEBUG: Tampilkan 10 baris pertama untuk memastikan injeksi berhasil
+              echo "🔍 Checking file content:"
+              head -n 10 "$TARGET_FILE"
           else
               echo "❌ ERROR: $TARGET_FILE not found!"
               exit 1
@@ -147,9 +151,10 @@ jobs:
              echo "✅ Removed ksu_init_rc_hook from fs/read_write.c"
           fi
           
-          # Fix fs/stat.c (KOREKSI: Hapus semua ksu_handle untuk mengcover sys_newfstatat)
+          # Fix fs/stat.c (KOREKSI PENTING: Hapus semua ksu_handle_*)
           if [ -f fs/stat.c ]; then
-             # Ini akan menghapus baris ksu_handle_vfs_fstat DAN ksu_handle_sys_newfstatat
+             # Menghapus baris yang mengandung 'ksu_handle_'
+             # Ini akan menghapus ksu_handle_vfs_fstat DAN ksu_handle_sys_newfstatat
              sed -i '/ksu_handle_/d' fs/stat.c 
              echo "✅ Removed all ksu_handle_* hooks from fs/stat.c"
           fi
@@ -241,7 +246,7 @@ jobs:
             echo "EXTRAVERSION = $FINAL_TAG" >> Makefile
           fi
 
-      - name: Setup Compiler (Clang 12)
+      - name: Setup Compiler (Symlink Trick Clang 12)
         working-directory: gki
         run: |
           mkdir -p prebuilts-master/clang/host/linux-x86
@@ -264,6 +269,7 @@ jobs:
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export KMI_ENFORCED=0
           export TRIM_NONLISTED_KMI=0
+          # O3 optimization + LTO Thin
           LTO=thin KCFLAGS="-O3" BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       # --- PACKAGING & RELEASE (CUSTOM) ---
@@ -278,7 +284,10 @@ jobs:
           KNAME="${{ github.event.inputs.kernel_name }}"
           [ -z "$KNAME" ] && KNAME="Zixine"
           
+          # ZIP Filename Clean
           ZIP_NAME="AK3-${KNAME}-${DATE}-${BASE_VER}-600Hz.zip"
+          
+          echo "📦 Target Zip: $ZIP_NAME"
           
           AK3_REPO="https://github.com/zixine/anykernel" 
           git clone -q --depth=1 "$AK3_REPO" -b main anykernel

@@ -91,6 +91,9 @@ jobs:
              echo "[✓] SUSFS patched"
           fi
           
+      - name: Apply common fixes
+        working-directory: gki/common
+        run: |
           echo "🛠️ Memperbaiki error undefined symbol (ksu_init_rc_hook & ksu_handle_vfs_fstat)..."
           
           # Perbaiki fs/read_write.c: Hapus panggilan ke ksu_init_rc_hook
@@ -110,8 +113,6 @@ jobs:
           fi
           
           echo "✅ Perbaikan selesai. Lanjut ke tahap berikutnya."
-      - name: Clean Build Config
-        run: sed -i '2d' gki/common/build.config.gki
 
       # --- APPLY ALL CRITICAL FIXES (Undefined Symbols & Bootloop) ---
       - name: Apply Critical Fixes (KSU + Xiaomi + Bootloop)

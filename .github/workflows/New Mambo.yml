@@ -89,7 +89,6 @@ jobs:
              cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
              patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
              echo "[✓] SUSFS patched"
-          fi
           
       - name: Apply common fixes
         working-directory: gki/common

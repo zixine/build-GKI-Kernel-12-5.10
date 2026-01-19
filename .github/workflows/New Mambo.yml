@@ -74,24 +74,42 @@ jobs:
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
      
       - name: "Setup KernelSU & SUSFS"
-        working-directory: ${{ env.WORK_DIR }}/common
+        working-directory: gki/common
         run: |
 
           echo "Installing KernelSU (SUSFS/RKSU)..."
           curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/susfs-rksu-master/kernel/setup.sh" | bash -s susfs-rksu-master
 
-          echo "Installing SUSFS..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
-          rm -rf sus/.git
-          cp -rf sus/kernel_patches/fs/* fs/
-          cp -rf sus/kernel_patches/include/* include/
+          echo "➡️ Applying SusFS Kernel Patches (Simonpunk)..."
+             git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+             rm -rf sus/.git
+             susfs=sus/kernel_patches
+             cp -r $susfs/fs .
+             cp -r $susfs/include .
+             cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+             patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+             echo "[✓] SUSFS patched"
+          fi
           
-          cp sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
+          echo "🛠️ Memperbaiki error undefined symbol (ksu_init_rc_hook & ksu_handle_vfs_fstat)..."
           
-          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+          # Perbaiki fs/read_write.c: Hapus panggilan ke ksu_init_rc_hook
+          if [ -f fs/read_write.c ]; then
+             echo "🧹 Membersihkan fs/read_write.c..."
+             # Menghapus baris yang mengandung 'ksu_init_rc_hook'
+             sed -i '/ksu_init_rc_hook/d' fs/read_write.c
+             echo "✅ fs/read_write.c diperbaiki (ksu_init_rc_hook dihapus)"
+          fi
           
-          echo "[✓] SUSFS patched successfully"
-
+          # Perbaiki fs/stat.c: Hapus panggilan ke ksu_handle_vfs_fstat
+          if [ -f fs/stat.c ]; then
+             echo "🧹 Membersihkan fs/stat.c..."
+             # Menghapus baris yang mengandung 'ksu_handle_vfs_fstat'
+             sed -i '/ksu_handle_vfs_fstat/d' fs/stat.c
+             echo "✅ fs/stat.c diperbaiki (ksu_handle_vfs_fstat dihapus)"
+          fi
+          
+          echo "✅ Perbaikan selesai. Lanjut ke tahap berikutnya."
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki
 

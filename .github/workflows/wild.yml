@@ -6,7 +6,7 @@ on:
       kernel_name:
         description: 'Nama Kernel (Final)'
         required: true
-        default: '✦Zeta-Missions'
+        default: 'Zixine-Elysium-Wild'
         type: string
       release_status:
         description: 'Status Rilis'
@@ -193,7 +193,7 @@ jobs:
         run: |
           NAME="${{ github.event.inputs.kernel_name }}"
           [ -z "$NAME" ] && NAME="Zixine-Elysium"
-          FINAL_TAG="-${NAME}-Wild-Performance"
+          FINAL_TAG="-${NAME}-1.4"
           echo "" > scripts/setlocalversion
           sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = $FINAL_TAG/" Makefile
 

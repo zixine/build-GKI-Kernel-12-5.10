@@ -1,11 +1,11 @@
-name: zixine Wild Builder (Performance & Low Latency)
+name: zixine Kernel Builder (MamboSU RapliVx - V12 Fixed)
 
 on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Nama Dasar Kernel'
-        required: false
+        description: 'Nama Kernel (Final)'
+        required: true
         default: '✦Zeta-Missions'
         type: string
       release_status:
@@ -21,10 +21,10 @@ permissions:
   contents: write
 
 jobs:
-  build-wild:
-    name: Build Wild Variant
+  mambo-build:
+    name: Build wild
     runs-on: ubuntu-22.04
-    
+
     steps:
       - name: Environment Preparation
         uses: easimon/maximize-build-space@master
@@ -37,8 +37,8 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
-      - name: Fetch Source Code
-        uses: checkout@v4
+      - name: Fetch Workflow Source
+        uses: actions/checkout@v4
 
       - name: Initialize Git Identity
         run: |

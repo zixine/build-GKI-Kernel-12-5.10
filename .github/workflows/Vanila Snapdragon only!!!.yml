@@ -1,0 +1,180 @@
+name: zixine Vanilla Builder (Garnet Final Safe)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_name:
+        description: 'Nama Kernel'
+        required: true
+        default: 'Zixine-Elysium'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Ultra Safe Performance
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Persiapan Lingkungan
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 10240
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Ambil Source Code
+        uses: actions/checkout@v4
+
+      - name: Identitas Git
+        run: |
+          git config --global user.name "zixine-bot"
+          git config --global user.email "bot@zixine.org"
+
+      - name: Instalasi Dependensi
+        run: |
+          sudo apt update && sudo apt upgrade -y
+          sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
+            libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
+
+      - name: Sinkronisasi GKI 5.10
+        run: |
+          mkdir gki && cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10 --depth=1
+          repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
+          
+      - name: Update Source (Garnet Stable)
+        run: |
+          cd gki/common
+          git remote add rama https://github.com/ramabondanp/android_kernel_common-5.10.git
+          git fetch -j12 rama
+          git checkout -b update-android12-5.10-staging rama/android12-5.10-staging
+          # Hapus jejak root engine
+          rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU
+
+      - name: Patch Driver & Fixes
+        working-directory: gki/common
+        run: |
+          # Optimasi Frekuensi CPU Snapdragon
+          TARGET_FILE="drivers/cpufreq/qcom-cpufreq-hw.c"
+          PATCH_SOURCE="https://raw.githubusercontent.com/Pzqqt/android_kernel_xiaomi_marble/refs/heads/melt-rebase/drivers/cpufreq/qcom-cpufreq-hw.c"
+          if [ -f "$TARGET_FILE" ]; then
+            curl -L "$PATCH_SOURCE" -o /tmp/qcom.c
+            cp /tmp/qcom.c "$TARGET_FILE"
+          fi
+          
+          # Infinix & Xiaomi Stability Fixes
+          curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o cam.patch
+          patch -p1 < cam.patch || echo "✅ Patch kamera sudah ada."
+          
+          sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
+          sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
+          sed -i 's/check_defconfig//' build.config.gki
+
+      - name: Inject Safe Ultra Configurations
+        working-directory: gki/common
+        run: |
+          TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
+          echo "⚙️ Menyuntikkan Konfigurasi Performa Aman..."
+          
+          cat >> $TARGET_CONFIG <<EOF
+          # --- RESPONSIVITAS & SCHEDULING ---
+          CONFIG_HZ_300=y
+          CONFIG_HZ=300
+          CONFIG_PREEMPT=y
+          CONFIG_PREEMPT_COUNT=y
+          CONFIG_SCHED_AUTOGROUP=y
+          CONFIG_SCHED_WALT=y
+          
+          # --- RCU OPTIMIZATION (STABLE) ---
+          CONFIG_RCU_EXPERT=y
+          CONFIG_RCU_BOOST=y
+          CONFIG_RCU_BOOST_DELAY=500
+          
+          # --- MEMORY & RAM ---
+          CONFIG_ZRAM=y
+          CONFIG_ZRAM_DEF_COMP_LZ4=y
+          CONFIG_ZRAM_WRITEBACK=y
+          CONFIG_ZSMALLOC=y
+          CONFIG_TRANSPARENT_HUGEPAGE=y
+          CONFIG_TRANSPARENT_HUGEPAGE_MADVISE=y
+          
+          # --- POWER MANAGEMENT (ADEM & EFISIEN) ---
+          CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+          CONFIG_ENERGY_MODEL=y
+          CONFIG_CPU_IDLE=y
+          CONFIG_ARM_CPUIDLE=y
+          CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+          
+          # --- NETWORKING & SPEED ---
+          CONFIG_TCP_CONG_ADVANCED=y
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_TCP_CONG_WESTWOOD=y
+          CONFIG_DEFAULT_BBR=y
+          CONFIG_NET_SCH_FQ=y
+          CONFIG_IP_NF_TARGET_TTL=y
+          CONFIG_IP6_NF_TARGET_HL=y
+          
+          # --- I/O PERFORMANCE ---
+          CONFIG_MQ_IOSCHED_KYBER=y
+          CONFIG_MQ_IOSCHED_BFQ=y
+          CONFIG_IOSCHED_BFQ=y
+          
+          # --- SYSTEM STABILITY ---
+          CONFIG_DEBUG_FS=y
+          CONFIG_PANIC_TIMEOUT=5
+          CONFIG_LOCALVERSION_AUTO=n
+          CONFIG_OPTIMIZE_INLINING=y
+          CONFIG_TICK_CPU_ACCOUNTING=y
+          
+          # --- KSU DISABLED (VANILLA) ---
+          # CONFIG_KSU is not set
+          EOF
+
+      - name: Set Version Tag
+        working-directory: gki/common
+        run: |
+          NAME="${{ github.event.inputs.kernel_name }}"
+          FINAL_TAG="-${NAME}"
+          echo "" > scripts/setlocalversion
+          sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = $FINAL_TAG/" Makefile
+
+      - name: Setup Compiler (Clang 12)
+        working-directory: gki
+        run: |
+          mkdir -p prebuilts-master/clang/host/linux-x86/clang-r416183b
+          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz" | tar -xz -C "prebuilts-master/clang/host/linux-x86/clang-r416183b"
+          cd prebuilts-master/clang/host/linux-x86
+          ln -s clang-r416183b clang-r563880b
+
+      - name: Execute Build
+        working-directory: gki
+        run: |
+          export KMI_SYMBOL_LIST_STRICT_MODE=0
+          export KMI_ENFORCED=0
+          LTO=thin KCFLAGS="-O3 -Wno-error=implicit-function-declaration" BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+
+      - name: Packaging AnyKernel3
+        run: |
+          DATE=$(date +"%Y%m%d")
+          KNAME="${{ github.event.inputs.kernel_name }}"
+          ZIP_NAME="AK3-${KNAME}-Garnet-Stable-${DATE}.zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          
+          git clone -q --depth=1 "https://github.com/zixine/anykernel" -b main anykernel
+          cp $(find gki/out -name "Image" -type f | head -n 1) anykernel/
+          cd anykernel && zip -r9 "../$ZIP_NAME" * -x .git .gitignore
+
+      - name: Upload Zip (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
+          compression-level: 9

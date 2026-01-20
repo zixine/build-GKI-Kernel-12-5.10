@@ -97,15 +97,23 @@ jobs:
           rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU
           curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
 
-      - name: Setup SuSFS (Simonpunk)
+      - name: Setup SuSFS (Deep Integration)
         working-directory: gki/common
         run: |
-          echo "🛡️ Installing SuSFS..."
+          echo "🛡️ Patching SuSFS..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
+          
+          # Copy Headers
           cp -r susfs-git/kernel_patches/include/* include/
           cp -r susfs-git/kernel_patches/fs/* fs/
+          
+          # Patch manual agar lebih presisi
           cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
-          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || echo "⚠️ Skip SuSFS patch error..."
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || true
+          
+          # Integrasi SuSFS ke Wild KSU (Agar KSU tahu ada SuSFS)
+          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
 
       - name: Apply Critical Fixes (Xiaomi + Bootloop)
         working-directory: gki/common
@@ -130,26 +138,13 @@ jobs:
           CONFIG_KPM=n
           CONFIG_KSU_MANUAL_HOOK=y
           CONFIG_KSU_KPROBES_HOOK=n
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
           CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=n
           CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_SU=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
           
           # Responsivitas Layar & Low Latency (< 17ms goal)
           CONFIG_HZ_300=y
@@ -158,7 +153,6 @@ jobs:
           CONFIG_SCHED_WALT=y
           
           # Dynamic Performance & Battery
-          CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
           CONFIG_ENERGY_MODEL=y
           CONFIG_CPU_IDLE=y
           CONFIG_ARM_CPUIDLE=y
@@ -224,7 +218,7 @@ jobs:
           DATE=$(date +"%Y%m%d")
           KNAME="${{ github.event.inputs.kernel_name }}"
           [ -z "$KNAME" ] && KNAME="Zixine"
-          ZIP_NAME="AK3-${KNAME}-${DATE}-${BASE_VER}-600Hz.zip"
+          ZIP_NAME="AK3-${KNAME}-${DATE}-${BASE_VER}-good.zip"
           AK3_REPO="https://github.com/zixine/anykernel" 
           git clone -q --depth=1 "$AK3_REPO" -b main anykernel
           IMG=$(find gki/out -name "Image" -type f | head -n 1)
@@ -240,7 +234,7 @@ jobs:
           if gh release view "$RELEASE_TAG" --repo "$TARGET_REPO" > /dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --clobber
           else
-            gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine MamboSU ${DATE}" --notes "Automated Build" --prerelease=false
+            gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine Wild ${DATE}" --notes "Automated Build" --prerelease=false
           fi
 
       - name: Archive Build Log

@@ -189,7 +189,7 @@ jobs:
              V_TAG=""
           fi
           
-          FINAL_TAG="-${NAME}${V_TAG}-1.4"
+          FINAL_TAG="-${NAME}${V_TAG}-1.5"
           echo "🏷️ Version: 5.10.x${FINAL_TAG}"
           echo "" > scripts/setlocalversion
           sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = $FINAL_TAG/" Makefile

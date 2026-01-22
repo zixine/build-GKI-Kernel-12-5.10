@@ -140,46 +140,16 @@ jobs:
       - name: Setup SuSFS & Fix Code Logic
         working-directory: gki/common
         run: |
-          echo "🛡️ Fetching SuSFS Resources..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
-          
-          # 1. Copy Header ke System Include
-          cp -rf susfs-git/kernel_patches/include/* include/
-          
-          # 2. Patch Header Manual
-          SUSFS_H="include/linux/susfs.h"
-          if [ -f "$SUSFS_H" ]; then
-             sed -i '1i #include <linux/types.h>' "$SUSFS_H"
-             sed -i '1i #include <linux/stat.h>' "$SUSFS_H"
-             sed -i '1i #include <linux/fs.h>' "$SUSFS_H"
-          fi
-          
-          # 3. Copy Header ke Driver Folder
-          mkdir -p drivers/kernelsu/linux
-          cp -f "$SUSFS_H" drivers/kernelsu/susfs.h
-          cp -f "$SUSFS_H" drivers/kernelsu/
-          cp -rf include/linux/susfs*.h drivers/kernelsu/linux/
-          
-          # 4. Inject Include ke supercalls.c
-          TARGET_FILE="drivers/kernelsu/supercalls.c"
-          if [ -f "$TARGET_FILE" ]; then
-              sed -i '/#include <linux\/susfs.h>/d' "$TARGET_FILE"
-              sed -i '1i #include <linux/susfs.h>' "$TARGET_FILE"
-              sed -i '1i #include "susfs.h"' "$TARGET_FILE"
-              
-              # --- FIX LOGIC ERROR HERE ---
-              # Error bilang: susfs_add_try_umount implicit, tapi add_try_umount ada.
-              # Kita ubah panggilan 'susfs_add_try_umount' jadi 'add_try_umount' jika memungkinkan
-              # ATAU hapus baris yang memanggil susfs_add_try_umount jika itu wrapper ganda.
-              
-              echo "🔧 Fixing function call mismatch..."
-              # Cek jika ada 'susfs_add_try_umount' tapi error
-              if grep -q "susfs_add_try_umount" "$TARGET_FILE"; then
-                  # Coba rename function call
-                  sed -i 's/susfs_add_try_umount/add_try_umount/g' "$TARGET_FILE"
-                  echo "✅ Renamed susfs_add_try_umount -> add_try_umount"
-              fi
-          fi
+         # Setup SuSFS (Disamakan dengan Suki)
+            echo "Setup SuSFS for Mambo (Suki Method)..."
+            git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+            rm -rf sus/.git
+            susfs=sus/kernel_patches
+            cp -r $susfs/fs .
+            cp -r $susfs/include .
+            cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+            echo "[✓] SUSFS patched"
           
           # 5. Copy implementasi SuSFS
           cp -r susfs-git/kernel_patches/fs/* fs/
@@ -225,7 +195,7 @@ jobs:
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
           CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=n
           CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
           CONFIG_KSU_SUSFS_ENABLE_LOG=y

@@ -87,6 +87,7 @@ jobs:
           
           # 3. Apply Patch
           patch -p1 < sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
+          echo "obj-y += kernelsu/" >> drivers/Makefile
           
       - name: Clean Build Config
         run: sed -i '2d' gki/common/build.config.gki
@@ -148,8 +149,6 @@ jobs:
           CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
           CONFIG_ENERGY_MODEL=y
           CONFIG_KSU_SUSFS_SUS_SU=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
           CONFIG_CPU_FREQ=y
           CONFIG_HIGH_RES_TIMERS=y
           CONFIG_CLEANCACHE=y

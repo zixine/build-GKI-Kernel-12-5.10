@@ -73,16 +73,23 @@ jobs:
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
 
-      # --- SETUP MAMBOSU ---
-      - name: Setup MamboSU (rsuntk)
+      # --- SETUP KSU RAPLIVX ---
+      - name: Setup KernelSU (RapliVx)
         working-directory: gki/common
         run: |
           echo "🧹 Membersihkan KSU lama..."
           rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU
           
-          echo "🔵 Mode: MamboSU (SuSFS)"
-          curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s susfs-rksu-master
-
+          echo "🔵 Menggunakan Repo RapliVx (susfs-rksu-master)"
+          # Clone hanya branch spesifik dan taruh di folder yang benar
+          git clone -b susfs-rksu-master https://github.com/RapliVx/KernelSU KernelSU
+          
+          # Jalankan setup manual ke path drivers
+          cd KernelSU
+          # Kita pakai manual copy karena kita butuh folder 'kernel' dari repo ini
+          cp -r kernel ../drivers/kernelsu
+          echo "✅ KernelSU RapliVx integrated to drivers/kernelsu"
+          
       - name: Setup SuSFS & Fix Headers
         working-directory: gki/common
         run: |

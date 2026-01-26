@@ -73,12 +73,13 @@ jobs:
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
 
-      # --- SETUP suki ---
-      - name: Setup SukiSU
+      # --- SETUP ksu metode ---
+      - name: Setup ksu methode and susfs 
         run: |
           cd gki/common
           echo "[6/12] Setup SukiSU & SUSFS"
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
+          echo " susfs metode "
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
           rm -rf sus/.git
           susfs=sus/kernel_patches

@@ -73,25 +73,21 @@ jobs:
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
 
-      # --- SETUP KSU RAPLIVX ---
-      - name: Setup KernelSU & SuSFS
-        working-directory: gki/common
+      # --- SETUP suki ---
+      - name: Setup SukiSU
         run: |
-          # 1. Integrasi KernelSU (RapliVx/rsuntk)
-          git clone -b susfs-rksu-master https://github.com/RapliVx/KernelSU drivers/kernelsu
-          
-          # 2. Setup SuSFS Kernel Side
+          cd gki/common
+          echo "[6/12] Setup SukiSU & SUSFS"
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-          cp sus/kernel_patches/include/linux/susfs.h include/linux/
-          cp sus/kernel_patches/fs/susfs.c fs/
+          rm -rf sus/.git
+          susfs=sus/kernel_patches
+          cp -r $susfs/fs .
+          cp -r $susfs/include .
+          cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+          echo "[✓] SUSFS patched"
           
-          # 3. Apply Patch
-          patch -p1 < sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
-          echo "obj-y += kernelsu/" >> drivers/Makefile
-          
-      - name: Clean Build Config
-        run: sed -i '2d' gki/common/build.config.gki
-
       # --- APPLY ALL CRITICAL FIXES (Wajib untuk Booting) ---
       - name: Apply Critical Fixes (KSU + Xiaomi + Bootloop)
         working-directory: gki/common
@@ -115,6 +111,9 @@ jobs:
           sed -i 's/bool "300 HZ"/bool "500 HZ"/g' "$KCONFIG_HZ"
           sed -i 's/default 300 if HZ_300/default 500 if HZ_500/g' "$KCONFIG_HZ"
 
+      - name: Clean Build Config
+        run: sed -i '2d' gki/common/build.config.gki
+        
       - name: Configure Kernel (Safe Mode)
         working-directory: gki/common
         run: |
@@ -130,21 +129,29 @@ jobs:
           CONFIG_KSU_KPROBES_HOOK=n
           
           # SUSFS Configuration
+          CONFIG_KSU=y
+          CONFIG_KPM=y
+          CONFIG_KSU_SUSFS_SUS_SU=n
+          CONFIG_KSU_SYSCALL_HOOK=n
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
           CONFIG_KSU_SUSFS_TRY_UMOUNT=y
           CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=n
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
           CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_MANUAL_HOOK=n
+          CONFIG_KSU_HAS_MANUAL_HOOK=n
           CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
           CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
           CONFIG_ENERGY_MODEL=y

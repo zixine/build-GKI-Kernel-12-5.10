@@ -77,23 +77,6 @@ jobs:
           echo "🐯 Applying Wild KSU (Stable)..."
           # Menggunakan branch 'stable' sesuai request
           curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s stable
-          
-          # --- MANAGER COMPATIBILITY FIX (KHUSUS WILD) ---
-          echo "🔧 Applying KernelSU-Next Manager Compatibility Fix..."
-          cd drivers/kernelsu
-          
-          curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.c -o apk_sign.c
-          curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.h -o apk_sign.h
-          curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/stable/kernel/manager.h -o manager.h
-
-          # Fix Implicit Declaration (AppID -> UID)
-          echo "" >> manager.h
-          echo "// Fix for WildKSU allowlist.c compatibility (appid -> uid)" >> manager.h
-          echo "static inline bool ksu_is_manager_appid_valid() { return ksu_is_manager_uid_valid(); }" >> manager.h
-          echo "static inline uid_t ksu_get_manager_appid() { return ksu_get_manager_uid(); }" >> manager.h
-          
-          echo "✅ [Patch] KernelSU Next Manager compatibility applied."
-          cd ../..
 
           # --- SETUP SUSFS ---
           echo "🛡️ Setting up SUSFS..."

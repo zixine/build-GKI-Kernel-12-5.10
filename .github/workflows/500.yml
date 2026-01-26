@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ksu_variant: [wild, sukisu, resukisu, vanila]
+        ksu_variant: [wild, resukisu]
 
     steps:
       - name: Environment Preparation
@@ -77,11 +77,6 @@ jobs:
           VARIANT="${{ matrix.ksu_variant }}"
           echo "⚙️ Setting up for variant: $VARIANT"
 
-          if [ "$VARIANT" = "vanila" ]; then
-            echo "🍦 Vanilla Build: Skipping KSU and SUSFS setup."
-            exit 0
-          fi
-
           # 1. Setup KSU Method
           if [ "$VARIANT" = "wild" ]; then
             echo "🐯 Applying Wild KSU..."
@@ -107,9 +102,6 @@ jobs:
             # Kembali ke gki/common untuk lanjut setup SUSFS
             cd ../..
 
-          elif [ "$VARIANT" = "sukisu" ]; then
-            echo "🍡 Applying SukiSU..."
-            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s tmp-builtin
           elif [ "$VARIANT" = "resukisu" ]; then
             echo "🔄 Applying ReSukiSU..."
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
@@ -156,10 +148,7 @@ jobs:
         working-directory: gki/common
         run: |
           TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
-          VARIANT="${{ matrix.ksu_variant }}"
-          
           echo "⚙️ Injecting Configuration..."
-          
           # 1. Config Umum (Berlaku untuk semua)
           cat >> $TARGET_CONFIG <<EOF
           CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
@@ -187,43 +176,30 @@ jobs:
           CONFIG_PM_WAKELOCKS=y
           # CONFIG_STACKPROTECTOR_PER_TASK is not set
           CONFIG_LOCALVERSION_AUTO=n
+          CONFIG_KSU=y
+          CONFIG_KPM=y
+          CONFIG_KSU_SUSFS_SUS_SU=y          
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           EOF
-
-          # 2. Config Khusus KSU & SUSFS (Hanya jika BUKAN Vanilla)
-          if [ "$VARIANT" != "vanila" ]; then
-            echo "💉 Injecting KSU & SUSFS Configs for $VARIANT..."
-            cat >> $TARGET_CONFIG <<EOF
-            # KernelSU Common
-            CONFIG_KSU=y
-            CONFIG_KPM=y
-            CONFIG_KSU_SUSFS_SUS_SU=y
-            
-            # SUSFS Specific
-            CONFIG_KSU_SUSFS=y
-            CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-            CONFIG_KSU_SUSFS_SUS_PATH=y
-            CONFIG_KSU_SUSFS_SUS_MOUNT=y
-            CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-            CONFIG_KSU_SUSFS_SUS_KSTAT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-            CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
-            CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-            CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-            CONFIG_KSU_SUSFS_ENABLE_LOG=y
-            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-            
-            # Additional Hooks
-            CONFIG_KSU_MANUAL_HOOK=n
-            CONFIG_KSU_HAS_MANUAL_HOOK=n
-          EOF
-          else
-            echo "🍦 Vanilla selected: NOT injecting KSU/SUSFS configs."
-          fi
+          #Additional Hooks
+          CONFIG_KSU_MANUAL_HOOK=n
+          CONFIG_KSU_HAS_MANUAL_HOOK=n
 
       # --- SET VERSION NAME (MURNI TANPA TAG) ---
       - name: Setup Version Name

@@ -141,6 +141,14 @@ jobs:
           echo "🧹 Cleaning Build Config..."
           sed -i 's/check_defconfig//' build.config.gki
 
+      - name: Replace 300Hz with 500Hz
+        working-directory: gki/common
+        run: |
+          KCONFIG_HZ="kernel/Kconfig.hz"
+          sed -i 's/config HZ_300/config HZ_500/g' "$KCONFIG_HZ"
+          sed -i 's/bool "300 HZ"/bool "500 HZ"/g' "$KCONFIG_HZ"
+          sed -i 's/default 300 if HZ_300/default 500 if HZ_500/g' "$KCONFIG_HZ"
+
       - name: Clean Build Config Line
         run: sed -i '2d' gki/common/build.config.gki
         
@@ -172,7 +180,7 @@ jobs:
           CONFIG_DEFAULT_BBR=y
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
-          CONFIG_HZ_300=y
+          CONFIG_HZ_500=y
           CONFIG_FS_ENCRYPTION=y
           CONFIG_FS_VERITY=y
           CONFIG_PM_AUTOSLEEP=y

@@ -74,8 +74,25 @@ jobs:
       - name: Setup MamboSU (RapliVx) & SUSFS
         working-directory: gki/common
         run: |
-          echo "⚙️ Setting up MamboSU (RapliVx)..."
-          curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/susfs-resuki-builtin/kernel/setup.sh" | bash -s susfs-resuki-builtin
+          echo "🐯 Applying Wild KSU..."
+            curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s stable
+            
+            # --- MANAGER COMPATIBILITY FIX (KHUSUS WILD) ---
+            echo "🔧 Applying KernelSU-Next Manager Compatibility Fix for Wild..."
+            # Masuk ke folder drivers/kernelsu agar file tersimpan di tempat yang benar
+            cd drivers/kernelsu
+            
+            curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.c -o apk_sign.c
+            curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.h -o apk_sign.h
+            curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/stable/kernel/manager.h -o manager.h
+
+            # Fix Implicit Declaration (AppID -> UID)
+            echo "" >> manager.h
+            echo "// Fix for WildKSU allowlist.c compatibility (appid -> uid)" >> manager.h
+            echo "static inline bool ksu_is_manager_appid_valid() { return ksu_is_manager_uid_valid(); }" >> manager.h
+            echo "static inline uid_t ksu_get_manager_appid() { return ksu_get_manager_uid(); }" >> manager.h
+            
+            echo "✅ [Patch] KernelSU Next Manager compatibility applied with AppID Fix."
           
           # Setup SUSFS Patching (Manual Patching ke Kernel FS)
           echo "🛡️ Setting up SUSFS Patches..."

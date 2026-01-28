@@ -1,53 +1,55 @@
-name: zixine Kernel Builder (Matrix - Wild, Suki, Mambo)
+name: WildKSU Special (300Hz & 500Hz)
 
 on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Nama Kernel (Final)'
+        description: 'Nama Kernel'
         required: true
-        default: 'Zixine-Elysium'
+        default: 'Zixine-Wild'
         type: string
-      release_status:
-        description: 'Status Rilis'
-        required: true
-        type: choice
-        default: 'RELEASE'
-        options:
-          - 'RELEASE'
-          - 'BETA'
 
 permissions:
   contents: write
 
 jobs:
-  matrix-build:
-    name: Build ${{ matrix.variant }}
+  build-kernel:
+    name: Build WildKSU ${{ matrix.hz }}Hz
     runs-on: ubuntu-22.04
+    
     strategy:
       fail-fast: false
       matrix:
-        variant: [Wild, Suki, Mambo]
+        variant: [wildksu] # Hanya WildKSU
+        hz: [300, 500]     # Hanya 300Hz dan 500Hz
 
     steps:
       - name: Environment Preparation
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 8192
-          swap-size-mb: 10240
+          root-reserve-mb: 2048
+          swap-size-mb: 1024
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
           remove-docker-images: 'true'
+      
+      - name: Manual Cleanup
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
 
-      - name: Fetch Workflow Source
+      - name: Fetch Source Code
         uses: actions/checkout@v4
 
       - name: Initialize Git Identity
         run: |
-          git config --global user.name "zixine-bot"
-          git config --global user.email "bot@zixine.org"
+          git config --global user.name "zixine"
+          git config --global user.email "waheid005@gmail.com"
 
       - name: Dependency Installation
         run: |
@@ -69,112 +71,113 @@ jobs:
           git checkout -b update-android12-5.10-staging rama/android12-5.10-staging
           rm -rf drivers/staging/kernelsu
 
+      # --- COMMON FIX (Infinix Camera) ---
       - name: Apply Infinix GT 20 Pro Camera Fix
         working-directory: gki/common
         run: |
           echo "📸 Applying Infinix GT 20 Pro Camera Fix..."
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
-          patch -p1 < infinix_cam.patch || echo "✅ Patch sudah ada."
+          patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
 
-      - name: Setup KernelSU Variant & SuSFS
+      # --- SETUP WILDKSU & SUSFS ---
+      - name: Setup WildKSU & SUSFS
         working-directory: gki/common
         run: |
-          VARIANT="${{ matrix.variant }}"
-          echo "🟣 Setup Variant: $VARIANT"
+          echo "⚙️ Setting up WildKSU..."
 
-          if [ "$VARIANT" == "Wild" ]; then
-            # --- WILD LOGIC (DEFAULT) ---
-            echo "Using Default Wild KSU Script..."
-            rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU
-            curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
-            
-            echo "🛡️ Patching SuSFS (Wild Method)..."
-            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
-            cp -r susfs-git/kernel_patches/include/* include/
-            cp -r susfs-git/kernel_patches/fs/* fs/
-            cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
-            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || true
-            # Config tambahan untuk Wild (sesuai script asli)
-            echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
-            echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
+          # 1. Clean Old KSU
+          echo "🧹 Cleaning existing KSU..."
+          for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
+            if [ -d $KSU_PATH ]; then
+              rm -rf $KSU_PATH
+              KSU_DIR=$(dirname "$KSU_PATH")
+              [ -f "$KSU_DIR/Kconfig" ] && sed -i '/kernelsu/d' $KSU_DIR/Kconfig
+              [ -f "$KSU_DIR/Makefile" ] && sed -i '/kernelsu/d' $KSU_DIR/Makefile
+            fi
+          done
 
-          elif [ "$VARIANT" == "Suki" ]; then
-            # --- SUKISU LOGIC ---
-            echo "[6/12] Setup SukiSU & SUSFS"
-            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s tmp-builtin
-            git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-            rm -rf sus/.git
-            susfs=sus/kernel_patches
-            cp -r $susfs/fs .
-            cp -r $susfs/include .
-            cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-            echo "[✓] SUSFS patched"
+          # 2. Install WildKSU
+          echo "[Wild] Adding Wild_KSU..."
+          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/Wild_KSU/refs/heads/stable/kernel/setup.sh" | bash -s stable
+          
+          # Patch Kbuild
+          sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
+          
+          # 3. Setup Headers & Fixes
+          cd drivers/kernelsu
+          curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.c -o apk_sign.c
+          curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.h -o apk_sign.h
+          curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/stable/kernel/manager.h -o manager.h
 
-          elif [ "$VARIANT" == "Mambo" ]; then
-            # --- MAMBOSU LOGIC ---
-            echo "Setup MamboSU..."
-            # Source Mambo
-            curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/susfs-rksu-master/kernel/setup.sh" | bash -s susfs-rksu-master
-            
-            # Setup SuSFS (Disamakan dengan Suki)
-            echo "Setup SuSFS for Mambo (Suki Method)..."
-            git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-            rm -rf sus/.git
-            susfs=sus/kernel_patches
-            cp -r $susfs/fs .
-            cp -r $susfs/include .
-            cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-            echo "[✓] SUSFS patched"
-          fi
+          # Fix Implicit Declaration (AppID -> UID)
+          echo "" >> manager.h
+          echo "// Fix for WildKSU allowlist.c compatibility (appid -> uid)" >> manager.h
+          echo "static inline bool ksu_is_manager_appid_valid() { return ksu_is_manager_uid_valid(); }" >> manager.h
+          echo "static inline uid_t ksu_get_manager_appid() { return ksu_get_manager_uid(); }" >> manager.h
+          cd ../..
+          echo "✅ [Patch] KernelSU Next Manager compatibility applied."
 
-      - name: Apply Critical Fixes (Xiaomi + Bootloop)
+          # 4. Setup SUSFS
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+          rm -rf sus/.git
+          susfs=sus/kernel_patches
+          cp -r $susfs/fs .
+          cp -r $susfs/include .
+          cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+          echo "[✓] SUSFS patched for WildKSU"
+
+      # --- APPLY CRITICAL FIXES ---
+      - name: Apply Critical Fixes
         working-directory: gki/common
         run: |
-          echo "🔧 Fixing Stack Protector..."
+          echo "🔧 Fixing Stack Protector (Xiaomi Anti-Bootloop)..."
           sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
+          
           echo "🔧 Fixing Xiaomi Module Compat..."
           sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
           sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
           sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
+          
+          echo "🧹 Cleaning Build Config..."
           sed -i 's/check_defconfig//' build.config.gki
 
-      - name: Configure Defconfig (KSU/SuSFS)
+      # --- LOGIKA HZ (300 vs 500) ---
+      - name: Configure Hz (${{ matrix.hz }})
         working-directory: gki/common
         run: |
-          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          HZ_VAL="${{ matrix.hz }}"
+          KCONFIG_HZ="kernel/Kconfig.hz"
           
-          cat <<EOF >> "$DEFCONFIG"
-          # KernelSU Configuration
-          CONFIG_KSU=y
-          CONFIG_KPM=n
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_KPROBES_HOOK=n
+          if [ "$HZ_VAL" = "500" ]; then
+            echo "🚀 Applying 500Hz Patch..."
+            sed -i 's/config HZ_300/config HZ_500/g' "$KCONFIG_HZ"
+            sed -i 's/bool "300 HZ"/bool "500 HZ"/g' "$KCONFIG_HZ"
+            sed -i 's/default 300 if HZ_300/default 500 if HZ_500/g' "$KCONFIG_HZ"
+          else
+            echo "ℹ️ Using default/300Hz (No change applied)."
+          fi
+
+      - name: Clean Build Config Line
+        run: sed -i '2d' gki/common/build.config.gki
+        
+      # --- CONFIGURATION INJECTION ---
+      - name: Configure Kernel (Defconfig)
+        working-directory: gki/common
+        run: |
+          TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
+          HZ_VAL="${{ matrix.hz }}"
           
-          # SUSFS Configuration
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          echo "⚙️ Injecting Configuration for WildKSU @ $HZ_VAL Hz..."
+          
+          # 1. Config UMUM
+          cat >> $TARGET_CONFIG <<EOF
           CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
           CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
           CONFIG_ENERGY_MODEL=y
-          CONFIG_KSU_SUSFS_SUS_SU=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-          CONFIG_HZ_300=y
+          CONFIG_CPU_IDLE=y
+          CONFIG_ARM_CPUIDLE=y
+          CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
           CONFIG_CPU_FREQ=y
           CONFIG_HIGH_RES_TIMERS=y
           CONFIG_CLEANCACHE=y
@@ -190,67 +193,131 @@ jobs:
           CONFIG_DEFAULT_BBR=y
           CONFIG_TMPFS_XATTR=y
           CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_FS_ENCRYPTION=y
+          CONFIG_FS_VERITY=y
+          CONFIG_PM_AUTOSLEEP=y
+          CONFIG_PM_WAKELOCKS=y
+          CONFIG_LOCALVERSION_AUTO=n
+          CONFIG_KPM=y
+          CONFIG_KSU=y
           EOF
 
-      - name: Apply Versioning
+          # 2. Config Khusus 500Hz
+          if [ "$HZ_VAL" = "500" ]; then
+            echo "CONFIG_HZ_500=y" >> $TARGET_CONFIG
+            cat >> $TARGET_CONFIG <<EOF
+          CONFIG_PREEMPT=y
+          CONFIG_PREEMPT_COUNT=y
+          CONFIG_SCHED_AUTOGROUP=y
+          CONFIG_SCHED_WALT=y
+          CONFIG_RCU_EXPERT=y
+          CONFIG_RCU_BOOST=y
+          CONFIG_RCU_BOOST_DELAY=500
+          EOF
+          fi
+
+          # 3. Config SUSFS (Wajib untuk WildKSU)
+          echo "✅ Adding SUSFS Configs..."
+          cat >> $TARGET_CONFIG <<EOF
+          CONFIG_KSU_SUSFS_SUS_SU=y          
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          EOF
+
+          # Cleanup Hooks
+          echo "CONFIG_KSU_MANUAL_HOOK=n" >> $TARGET_CONFIG
+          echo "CONFIG_KSU_HAS_MANUAL_HOOK=n" >> $TARGET_CONFIG
+
+      # --- SET VERSION NAME ---
+      - name: Setup Version Name
         working-directory: gki/common
         run: |
           NAME="${{ github.event.inputs.kernel_name }}"
-          
-          # Menggunakan nama murni sesuai input user. Tidak ada varian, tidak ada versi tambahan.
-          FINAL_TAG="-${NAME}"
-          echo "🏷️ Version: 5.10.x${FINAL_TAG}"
-          echo "" > scripts/setlocalversion
-          sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = $FINAL_TAG/" Makefile
+          rm -f localversion*
+          sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
+          echo "-$NAME" > localversion
 
       - name: Setup Compiler (Clang 12)
         working-directory: gki
         run: |
-          mkdir -p prebuilts-master/clang/host/linux-x86/clang-r416183b
-          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz" | tar -xz -C "prebuilts-master/clang/host/linux-x86/clang-r416183b"
+          mkdir -p prebuilts-master/clang/host/linux-x86
+          ACTUAL_VER="clang-r416183b"
+          ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz"
+          EXPECTED_VER="clang-r563880b"
+          mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
+          curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
           cd prebuilts-master/clang/host/linux-x86
-          ln -s clang-r416183b clang-r563880b
+          rm -rf "$EXPECTED_VER"
+          ln -s "$ACTUAL_VER" "$EXPECTED_VER"
 
       - name: Execute Build
         working-directory: gki
         run: |
+          echo "🚀 Starting Compilation for WildKSU @ ${{ matrix.hz }}Hz..."
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export KMI_ENFORCED=0
-          LTO=thin KCFLAGS="-O3 -Wno-error=implicit-function-declaration -Wno-error=visibility" BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+          export TRIM_NONLISTED_KMI=0
+          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
-      - name: Packaging & Release
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+      # --- PACKAGING (Artifact Only) ---
+      - name: Packaging AnyKernel3
+        if: success()
         run: |
           BASE_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
+          FULL_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
           DATE=$(date +"%Y%m%d")
+          
           KNAME="${{ github.event.inputs.kernel_name }}"
-          VARIANT="${{ matrix.variant }}"
+          [ -z "$KNAME" ] && KNAME="Zixine-Wild"
           
-          # Nama ZIP tetap butuh varian agar tidak saling menimpa saat upload (Wild/Suki/Mambo)
-          ZIP_NAME="AK3-${KNAME}-${VARIANT}-${DATE}-${BASE_VER}.zip"
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          HZ_VAL="${{ matrix.hz }}"
+          ZIP_NAME="AK3-${KNAME}-${HZ_VAL}hz-${DATE}.zip"
           
-          git clone -q --depth=1 "https://github.com/zixine/anykernel" -b main anykernel
+          AK3_REPO="https://github.com/zixine/anykernel" 
+          git clone -q --depth=1 "$AK3_REPO" -b main anykernel
+          
           IMG=$(find gki/out -name "Image" -type f | head -n 1)
+          if [ -z "$IMG" ]; then echo "❌ Error: Image not found!"; exit 1; fi
+          
           cp "$IMG" anykernel/
           
+          sed -i "s|kernel.string=.*|kernel.string=${FULL_VER} by Zixine|g" anykernel/anykernel.sh
+          
           cd anykernel
+          chmod +x anykernel.sh tools/magiskboot tools/ak3-core.sh META-INF/com/google/android/update-binary
           zip -r9 "../$ZIP_NAME" * -x .git .gitignore README.md
-          cd ..
           
-          TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
-          RELEASE_TAG="${KNAME}-${DATE}-${VARIANT}"
-          
-          if gh release view "$RELEASE_TAG" --repo "$TARGET_REPO" > /dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --clobber
-          else
-            gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine ${VARIANT} ${DATE}" --notes "Variant: $VARIANT" --prerelease=false
-          fi
+          echo "ZIP_FINAL_PATH=../$ZIP_NAME" >> $GITHUB_ENV
+          echo "ZIP_FINAL_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      # --- UPLOAD ARTIFACT ---
+      - name: Upload Kernel ZIP (Link Only)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_FINAL_NAME }}
+          path: ${{ env.ZIP_FINAL_PATH }}
+          if-no-files-found: error
 
       - name: Archive Build Log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ matrix.variant }}
+          name: build-log-wildksu-${{ matrix.hz }}
           path: gki/out/android12-5.10/common/build.log
+          if-no-files-found: warn

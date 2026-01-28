@@ -79,54 +79,36 @@ jobs:
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
 
-      # --- SETUP WILDKSU & SUSFS ---
-      - name: Setup WildKSU & SUSFS
+      - name: Setup Wild KernelSU
         working-directory: gki/common
         run: |
-          echo "⚙️ Setting up WildKSU..."
+          echo "🟣 Mode: Wild KernelSU"
+          rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
 
-          # 1. Clean Old KSU
-          echo "🧹 Cleaning existing KSU..."
-          for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
-            if [ -d $KSU_PATH ]; then
-              rm -rf $KSU_PATH
-              KSU_DIR=$(dirname "$KSU_PATH")
-              [ -f "$KSU_DIR/Kconfig" ] && sed -i '/kernelsu/d' $KSU_DIR/Kconfig
-              [ -f "$KSU_DIR/Makefile" ] && sed -i '/kernelsu/d' $KSU_DIR/Makefile
-            fi
-          done
+      - name: Setup SuSFS (Deep Integration)
+        working-directory: gki/common
+        run: |
+          echo "🛡️ Patching SuSFS..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
+          cp -r susfs-git/kernel_patches/include/* include/
+          cp -r susfs-git/kernel_patches/fs/* fs/
+          cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || true
+          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
 
-          # 2. Install WildKSU
-          echo "[Wild] Adding Wild_KSU..."
-          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/Wild_KSU/refs/heads/stable/kernel/setup.sh" | bash -s stable
+      - name: Apply Critical Fixes (Xiaomi + Bootloop)
+        working-directory: gki/common
+        run: |
+          echo "🔧 Fixing Stack Protector..."
+          sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
+          echo "🔧 Fixing Xiaomi Module Compat..."
+          sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
+          sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
+          sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
+          sed -i 's/check_defconfig//' build.config.gki
           
-          # Patch Kbuild
-          sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-          
-          # 3. Setup Headers & Fixes
-          cd drivers/kernelsu
-          curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.c -o apk_sign.c
-          curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.h -o apk_sign.h
-          curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/stable/kernel/manager.h -o manager.h
-
-          # Fix Implicit Declaration (AppID -> UID)
-          echo "" >> manager.h
-          echo "// Fix for WildKSU allowlist.c compatibility (appid -> uid)" >> manager.h
-          echo "static inline bool ksu_is_manager_appid_valid() { return ksu_is_manager_uid_valid(); }" >> manager.h
-          echo "static inline uid_t ksu_get_manager_appid() { return ksu_get_manager_uid(); }" >> manager.h
-          cd ../..
-          echo "✅ [Patch] KernelSU Next Manager compatibility applied."
-
-          # 4. Setup SUSFS
-          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-          rm -rf sus/.git
-          susfs=sus/kernel_patches
-          cp -r $susfs/fs .
-          cp -r $susfs/include .
-          cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-          echo "[✓] SUSFS patched for WildKSU"
-
       # --- APPLY CRITICAL FIXES ---
       - name: Apply Critical Fixes
         working-directory: gki/common

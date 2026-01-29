@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         variant: [sukisu, wildksu, mambosu, vanila]
-        hz: [300, 500]
+        hz: [250, 500]
 
     steps:
       - name: Environment Preparation
@@ -121,49 +121,57 @@ jobs:
           # ---------------------------------------------------------
           elif [ "$VARIANT" = "wildksu" ]; then
             clean_ksu
-            echo "[Wild] Adding Wild_KSU..."
-            curl -LSs "https://raw.githubusercontent.com/Kingfinik98/Wild_KSU/refs/heads/stable/kernel/setup.sh" | bash -s stable
-            
-            # Patch Kbuild
-            sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-            
-            # Setup Headers (apk_sign & manager)
-            cd drivers/kernelsu
-            curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.c -o apk_sign.c
-            curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/apk_sign.h -o apk_sign.h
-            curl -LSs https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/stable/kernel/manager.h -o manager.h
+            echo "🟣 Mode: Wild KernelSU"
+            rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU
+            curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
 
-            # Fix Implicit Declaration (AppID -> UID)
-            echo "" >> manager.h
-            echo "// Fix for WildKSU allowlist.c compatibility (appid -> uid)" >> manager.h
-            echo "static inline bool ksu_is_manager_appid_valid() { return ksu_is_manager_uid_valid(); }" >> manager.h
-            echo "static inline uid_t ksu_get_manager_appid() { return ksu_get_manager_uid(); }" >> manager.h
-            cd ../..
-            echo "✅ [Patch] KernelSU Next Manager compatibility applied."
-
-            # Setup SUSFS (Hook Method)
-            git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-            rm -rf sus/.git
-            susfs=sus/kernel_patches
-            cp -r $susfs/fs .
-            cp -r $susfs/include .
-            cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-            echo "[✓] SUSFS patched for WildKSU"
+            # Setup SusFS
+            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
+            cp -r susfs-git/kernel_patches/include/* include/
+            cp -r susfs-git/kernel_patches/fs/* fs/
+            cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
+            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || true
+            echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
+            echo "gasken aman susfs nya"
 
           # ---------------------------------------------------------
           # 3. MAMBOSU (Rsuntk + Kprobes Only + No SUSFS)
           # ---------------------------------------------------------
           elif [ "$VARIANT" = "mambosu" ]; then
             clean_ksu
-            echo "[Mambo] Setup Rsuntk KernelSU (No SUSFS)..."
-            curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
-            
-            if [ -f "drivers/kernelsu/Kbuild" ]; then
-              sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-              echo "✅ Kbuild patched."
+            echo "🧩 Setup KernelSU dan Hook Method (Kprobes Only)"
+          for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
+            if [ -d $KSU_PATH ]; then
+              echo "KernelSU driver found in $KSU_PATH, Removing..."
+              KSU_DIR=$(dirname "$KSU_PATH")
+              [ -f "$KSU_DIR/Kconfig" ] && sed -i '/kernelsu/d' $KSU_DIR/Kconfig
+              [ -f "$KSU_DIR/Makefile" ] && sed -i '/kernelsu/d' $KSU_DIR/Makefile
+              rm -rf $KSU_PATH
             fi
-            echo "➡️ Using Kprobes Hook (Standard) - NO SUSFS applied."
+          done
+          echo "✅ Existing KernelSU drivers removed"
+          echo "➡️ Menambahkan KernelSU"
+          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
+          echo "✅ KernelSU added"
+          # 3. Apply Manager Support Patch manager MamboSU
+          echo "🛠️ Applying MamboSU Manager Support Patch..."
+          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/15ddb8c469eab27491d5bb0f8f66b7fe2c15d0d7/kernel-patches/ksu/rksu-add-mambosu-manager-support.patch" -o /tmp/rksu_manager.patch
+          cd KernelSU
+          patch -p1 < /tmp/rksu_manager.patch
+          cd ..
+          echo "✅ Manager Patch Applied"
+          
+          # --- FIX: Cek file Kbuild sebelum menjalankan sed untuk menghindari error ---
+          if [ -f "drivers/kernelsu/Kbuild" ]; then
+            sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
+            echo "✅ Kbuild patched."
+          else
+            echo "⚠️ File Kbuild tidak ditemukan, melewati patching."
+          fi
+          # -------------------------------------------------------------------------
+          echo "➡️ Menggunakan metode Kprobes Hook (Standar)"
+          echo "✅ Kprobes setup selesai"
 
           # ---------------------------------------------------------
           # 4. VANILA (No KSU + No SUSFS)
@@ -252,13 +260,8 @@ jobs:
           if [ "$HZ_VAL" = "500" ]; then
             echo "CONFIG_HZ_500=y" >> $TARGET_CONFIG
             cat >> $TARGET_CONFIG <<EOF
-          CONFIG_PREEMPT=y
-          CONFIG_PREEMPT_COUNT=y
           CONFIG_SCHED_AUTOGROUP=y
           CONFIG_SCHED_WALT=y
-          CONFIG_RCU_EXPERT=y
-          CONFIG_RCU_BOOST=y
-          CONFIG_RCU_BOOST_DELAY=500
           EOF
           fi
 

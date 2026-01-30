@@ -230,7 +230,7 @@ jobs:
         working-directory: gki
         run: |
           mkdir -p prebuilts-master/clang/host/linux-x86
-          ACTUAL_VER="clang-r416183b"
+          ACTUAL_VER="clang-r487747c"
           ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r1/clang-r487747c.tar.gz"
           EXPECTED_VER="clang-r563880b"
           mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"

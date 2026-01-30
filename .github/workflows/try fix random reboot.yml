@@ -1,4 +1,4 @@
-name: Matrix Kernel Builder (Multi-Method + Clang 17)
+name: Matrix Kernel Builder (Storage Optimized + Clang 17)
 
 on:
   workflow_dispatch:
@@ -24,12 +24,25 @@ jobs:
         hz_variant: [250, 300, 500]
 
     steps:
-      # --- CLEANUP DISK (PENTING AGAR TIDAK ERROR SPACE) ---
-      - name: Cleanup Disk Space
+      # --- FIX 1: PEMBERSIHAN DISK MANUAL & AGRESIF (SOLUSI NO SPACE LEFT) ---
+      - name: Free Disk Space (Aggressive)
+        run: |
+          echo "🧹 Cleaning up disk space..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
+
+      # --- FIX 2: MAXIMIZE SPACE (Tetap dipakai untuk resize partisi) ---
+      - name: Maximize Build Space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 2048
-          swap-size-mb: 512
+          root-reserve-mb: 1024      # Cukup 1GB untuk root system
+          swap-size-mb: 512          # Swap kecil saja, utamakan storage fisik
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
@@ -46,17 +59,20 @@ jobs:
 
       - name: Dependency Installation
         run: |
-          sudo apt update
-          sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
+          # Update package list dengan hati-hati
+          sudo apt-get update
+          sudo apt-get install -y git curl repo build-essential bc bison flex libssl-dev \
             libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
-          sudo apt clean
-          # FIX: Tambahkan sudo di sini agar tidak permission denied
+          # Bersihkan cache lagi setelah install
+          sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
 
+      # --- FIX 3: OPTIMIZED REPO SYNC (Hemat Kuota & Space) ---
       - name: Init & Sync GKI
         run: |
           mkdir gki && cd gki
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10 --depth=1
+          # Tambahkan --groups=all,-notdefault,-device,-mips,-x86,-darwin untuk skip file sampah
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10 --depth=1 --groups=all,-notdefault,-device,-mips,-x86,-darwin
           repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
           
       - name: Update kernel source for GKI 5.10
@@ -252,20 +268,15 @@ jobs:
           sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
           echo "-$NAME-$HZ_VAL" > localversion
 
-      # --- UPDATE: CLANG 17 (R487747C) ---
+      # --- SETUP CLANG 17 ---
       - name: Setup Compiler (Clang 17)
         working-directory: gki
         run: |
           echo "⬇️ Downloading Clang 17 (r487747c)..."
           mkdir -p prebuilts-master/clang/host/linux-x86
-          
-          # Target folder untuk build system GKI
           TARGET_DIR="prebuilts-master/clang/host/linux-x86/clang-r487747c"
           mkdir -p "$TARGET_DIR"
-          
-          # URL Clang 17 resmi dari Google
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r1/clang-r487747c.tar.gz"
-          
           curl -L "$CLANG_URL" | tar -xz -C "$TARGET_DIR"
 
       - name: Execute Build
@@ -277,9 +288,7 @@ jobs:
           export KMI_ENFORCED=0
           export TRIM_NONLISTED_KMI=0
           
-          # UPDATE: Paksa Path Clang 17 agar GKI tidak pakai default compiler
-          # 'prebuilts-master/clang/host/linux-x86/clang-r487747c/bin'
-          
+          # Force path Clang 17
           LTO=thin \
           LLVM=1 \
           LLVM_IAS=1 \
@@ -326,4 +335,4 @@ jobs:
         with:
           name: build-log-${{ matrix.ksu_variant }}-${{ matrix.hz_variant }}
           path: gki/out/android12-5.10/common/build.log
-          if-no-files-found: warnq
+          if-no-files-found: warn

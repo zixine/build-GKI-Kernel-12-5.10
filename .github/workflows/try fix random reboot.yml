@@ -50,7 +50,8 @@ jobs:
           sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
             libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
           sudo apt clean
-          rm -rf /var/lib/apt/lists/*
+          # FIX: Tambahkan sudo di sini agar tidak permission denied
+          sudo rm -rf /var/lib/apt/lists/*
 
       - name: Init & Sync GKI
         run: |
@@ -266,12 +267,6 @@ jobs:
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r1/clang-r487747c.tar.gz"
           
           curl -L "$CLANG_URL" | tar -xz -C "$TARGET_DIR"
-          
-          # Symlink agar build.config mendeteksi versi ini jika dibutuhkan
-          # Namun kita akan force path di step build
-          cd prebuilts-master/clang/host/linux-x86
-          rm -rf clang-r584948b # Hapus symlink lama jika ada
-          ln -s "clang-r487747c" "clang-r584948b" # Fake link jika script hardcode ke versi lain
 
       - name: Execute Build
         working-directory: gki
@@ -282,11 +277,13 @@ jobs:
           export KMI_ENFORCED=0
           export TRIM_NONLISTED_KMI=0
           
-          # UPDATE: Tambahkan LLVM=1 dan LLVM_IAS=1 untuk Clang 17
-          # Ini memaksa penggunaan LLD linker dan Integrated Assembler
+          # UPDATE: Paksa Path Clang 17 agar GKI tidak pakai default compiler
+          # 'prebuilts-master/clang/host/linux-x86/clang-r487747c/bin'
+          
           LTO=thin \
           LLVM=1 \
           LLVM_IAS=1 \
+          CLANG_PREBUILT_BIN=prebuilts-master/clang/host/linux-x86/clang-r487747c/bin \
           KCFLAGS="-O3 -Wno-error=implicit-function-declaration -Wno-error=unused-command-line-argument" \
           BUILD_CONFIG=common/build.config.gki.aarch64 \
           build/build.sh
@@ -329,4 +326,4 @@ jobs:
         with:
           name: build-log-${{ matrix.ksu_variant }}-${{ matrix.hz_variant }}
           path: gki/out/android12-5.10/common/build.log
-          if-no-files-found: warn
+          if-no-files-found: warnq

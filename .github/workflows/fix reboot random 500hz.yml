@@ -23,11 +23,26 @@ jobs:
         ksu_variant: [wild, sukisu, resukisu, vanila]
 
     steps:
-      - name: Environment Preparation
+      # --- LANGKAH 1: PEMBERSIHAN DISK PALING AGRESIF ---
+      # Ini menghapus folder raksasa bawaan runner agar apt-get update tidak error 28
+      - name: Extreme Disk Cleanup
+        run: |
+          echo "🧹 Menghapus software sampah bawaan Microsoft..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo docker image prune --all --force
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
+
+      - name: Maximize Build Space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 8192
-          swap-size-mb: 10240
+          root-reserve-mb: 1024
+          swap-size-mb: 512
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
@@ -44,14 +59,18 @@ jobs:
 
       - name: Dependency Installation
         run: |
-          sudo apt update && sudo apt upgrade -y
-          sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
+          sudo apt-get update
+          sudo apt-get install -y git curl repo build-essential bc bison flex libssl-dev \
             libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
 
+      # --- INIT & SYNC (OPTIMIZED) ---
       - name: Init & Sync GKI
         run: |
           mkdir gki && cd gki
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10 --depth=1
+          # Filter grup agar tidak mendownload kernel untuk platform lain (hemat space)
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10 --depth=1 --groups=all,-notdefault,-device,-mips,-x86,-darwin
           repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
           
       - name: Update kernel source for GKI 5.10

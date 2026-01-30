@@ -1,10 +1,10 @@
-name: Matrix Kernel Builder (Storage Optimized + Clang 17)
+name: Matrix Kernel Builder (Extreme Storage Fix + Clang 17)
 
 on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Nama Kernel (Akan menjadi nama final, misal: Zixine-V1)'
+        description: 'Nama Kernel (Contoh: Zixine)'
         required: true
         default: 'Zixine'
         type: string
@@ -24,25 +24,24 @@ jobs:
         hz_variant: [250, 300, 500]
 
     steps:
-      # --- FIX 1: PEMBERSIHAN DISK MANUAL & AGRESIF (SOLUSI NO SPACE LEFT) ---
-      - name: Free Disk Space (Aggressive)
+      # --- LANGKAH 1: PEMBERSIHAN TOTAL (SEBELUM APAPUN) ---
+      - name: Extreme Disk Cleanup
         run: |
-          echo "🧹 Cleaning up disk space..."
+          echo "🧹 Menghapus sampah raksasa secara manual..."
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          echo "✅ Sampah dihapus. Cek sisa storage:"
           df -h
 
-      # --- FIX 2: MAXIMIZE SPACE (Tetap dipakai untuk resize partisi) ---
       - name: Maximize Build Space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 1024      # Cukup 1GB untuk root system
-          swap-size-mb: 512          # Swap kecil saja, utamakan storage fisik
+          root-reserve-mb: 512       # Sisakan sesedikit mungkin untuk root
+          swap-size-mb: 512
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
@@ -59,19 +58,20 @@ jobs:
 
       - name: Dependency Installation
         run: |
-          # Update package list dengan hati-hati
-          sudo apt-get update
-          sudo apt-get install -y git curl repo build-essential bc bison flex libssl-dev \
-            libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
-          # Bersihkan cache lagi setelah install
+          # Bersihkan cache apt yang mungkin korup karena disk full sebelumnya
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
+          sudo apt-get update
+          # Install hanya yang sangat dibutuhkan tanpa rekomendasi tambahan
+          sudo apt-get install -y --no-install-recommends git curl repo build-essential bc bison flex libssl-dev \
+            libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
+          sudo apt-get clean
 
-      # --- FIX 3: OPTIMIZED REPO SYNC (Hemat Kuota & Space) ---
+      # --- OPTIMIZED SYNC (Penting agar tidak memakan disk banyak) ---
       - name: Init & Sync GKI
         run: |
           mkdir gki && cd gki
-          # Tambahkan --groups=all,-notdefault,-device,-mips,-x86,-darwin untuk skip file sampah
+          # Filter grup agar tidak mendownload kernel untuk platform lain (mips, x86, dll)
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10 --depth=1 --groups=all,-notdefault,-device,-mips,-x86,-darwin
           repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
           
@@ -86,248 +86,129 @@ jobs:
       - name: Apply Infinix GT 20 Pro Camera Fix
         working-directory: gki/common
         run: |
-          echo "📸 Applying Infinix GT 20 Pro Camera Fix..."
+          echo "📸 Applying Camera Fix..."
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
-          patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
+          patch -p1 < infinix_cam.patch || echo "✅ Patch SKIP."
 
-      # --- MATRIX SETUP KSU & SUSFS ---
+      # --- KSU SETUP ---
       - name: Setup Variant (${{ matrix.ksu_variant }})
         working-directory: gki/common
         run: |
           VARIANT="${{ matrix.ksu_variant }}"
-          echo "⚙️ Setting up for variant: $VARIANT"
-
           clean_ksu() {
-            echo "🧹 Cleaning existing KSU..."
             rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU
             find drivers -name "Makefile" -exec sed -i '/kernelsu/d' {} + || true
             find drivers -name "Kconfig" -exec sed -i '/kernelsu/d' {} + || true
           }
 
-          if [ "$VARIANT" = "sukisu" ]; then
-            echo "[Sukisu] Setup ReSukiSU & SUSFS"
+          if [ "$VARIANT" = "sukisu" ] || [ "$VARIANT" = "resukisu" ]; then
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
-            
-            git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-            rm -rf sus/.git
-            susfs=sus/kernel_patches
-            cp -r $susfs/fs .
-            cp -r $susfs/include .
-            cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-
           elif [ "$VARIANT" = "wild" ]; then
             clean_ksu
-            echo "🟣 Mode: Wild KernelSU"
             curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
-
-            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
-            cp -r susfs-git/kernel_patches/include/* include/
-            cp -r susfs-git/kernel_patches/fs/* fs/
-            cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
-            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || true
-
           elif [ "$VARIANT" = "mambosu" ]; then
             clean_ksu
-            echo "🐍 Setup MamboSU (Kprobes Only)"
             curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
-            
-            echo "🛠️ Applying MamboSU Manager Support Patch..."
-            curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/15ddb8c469eab27491d5bb0f8f66b7fe2c15d0d7/kernel-patches/ksu/rksu-add-mambosu-manager-support.patch" -o /tmp/rksu_manager.patch
             cd KernelSU
-            patch -p1 < /tmp/rksu_manager.patch
+            curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/15ddb8c469eab27491d5bb0f8f66b7fe2c15d0d7/kernel-patches/ksu/rksu-add-mambosu-manager-support.patch" | patch -p1
             cd ..
-            
-            if [ -f "drivers/kernelsu/Kbuild" ]; then
-              sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-            fi
-
-          elif [ "$VARIANT" = "resukisu" ]; then
-             clean_ksu
-             echo "🌀 Setup ReSukiSU Standard"
-             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
-
-          elif [ "$VARIANT" = "vanila" ]; then
-            clean_ksu
-            echo "[Vanila] Skipping KSU setup. Building clean kernel."
+            [ -f "drivers/kernelsu/Kbuild" ] && sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# /' drivers/kernelsu/Kbuild
           fi
 
       - name: Apply Critical Fixes
         working-directory: gki/common
         run: |
-          echo "🔧 Fixing Stack Protector..."
           sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
-          
-          echo "🔧 Fixing Xiaomi Module Compat..."
           sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
-          sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
-          sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
-          
-          echo "🧹 Cleaning Build Config..."
           sed -i 's/check_defconfig//' build.config.gki
 
       - name: Configure HZ (${{ matrix.hz_variant }})
         working-directory: gki/common
         run: |
-          HZ_VAL="${{ matrix.hz_variant }}"
-          echo "⚡ Setting Kernel HZ to $HZ_VAL..."
-          KCONFIG_HZ="kernel/Kconfig.hz"
-          
-          sed -i "s/config HZ_300/config HZ_${HZ_VAL}/g" "$KCONFIG_HZ"
-          sed -i "s/bool \"300 HZ\"/bool \"$HZ_VAL HZ\"/g" "$KCONFIG_HZ"
-          sed -i "s/default 300 if HZ_300/default $HZ_VAL if HZ_${HZ_VAL}/g" "$KCONFIG_HZ"
+          HZ="${{ matrix.hz_variant }}"
+          sed -i "s/config HZ_300/config HZ_${HZ}/g" kernel/Kconfig.hz
+          sed -i "s/bool \"300 HZ\"/bool \"${HZ} HZ\"/g" kernel/Kconfig.hz
+          sed -i "s/default 300 if HZ_300/default ${HZ} if HZ_${HZ}/g" kernel/Kconfig.hz
 
-      - name: Clean Build Config Line
-        run: sed -i '2d' gki/common/build.config.gki
-        
       - name: Configure Kernel
         working-directory: gki/common
         run: |
-          TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
+          TARGET="arch/arm64/configs/gki_defconfig"
+          HZ="${{ matrix.hz_variant }}"
           VARIANT="${{ matrix.ksu_variant }}"
-          HZ_VAL="${{ matrix.hz_variant }}"
           
-          echo "⚙️ Injecting Configuration..."
-          
-          cat >> $TARGET_CONFIG <<EOF
-          CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
-          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
-          CONFIG_ENERGY_MODEL=y
-          CONFIG_CPU_FREQ=y
-          CONFIG_HIGH_RES_TIMERS=y
-          CONFIG_CLEANCACHE=y
-          CONFIG_IP_NF_TARGET_TTL=y
-          CONFIG_IP6_NF_TARGET_HL=y
-          CONFIG_IP6_NF_MATCH_HL=y
-          CONFIG_TCP_CONG_ADVANCED=y
+          # Config Umum
+          cat >> $TARGET <<EOF
           CONFIG_TCP_CONG_BBR=y
-          CONFIG_NET_SCH_FQ=y
-          CONFIG_TCP_CONG_BIC=n
-          CONFIG_TCP_CONG_WESTWOOD=n
-          CONFIG_TCP_CONG_HTCP=n
           CONFIG_DEFAULT_BBR=y
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          CONFIG_FS_ENCRYPTION=y
-          CONFIG_FS_VERITY=y
-          CONFIG_PM_AUTOSLEEP=y
-          CONFIG_PM_WAKELOCKS=y
-          CONFIG_PSI=y
-          CONFIG_PSI_DEFAULT_DISABLED=n
-          CONFIG_MEMCG=y
-          CONFIG_MEMCG_SWAP=y
-          CONFIG_ANDROID_LOW_MEMORY_KILLER=y
+          CONFIG_HZ_${HZ}=y
+          CONFIG_HZ=$HZ
           CONFIG_LOCALVERSION_AUTO=n
-          CONFIG_HZ_${HZ_VAL}=y
-          CONFIG_HZ=$HZ_VAL
           EOF
 
+          # Config KSU & SUSFS
           if [ "$VARIANT" != "vanila" ]; then
-            cat >> $TARGET_CONFIG <<EOF
+            cat >> $TARGET <<EOF
           CONFIG_KSU=y
-          CONFIG_KPM=y
-          CONFIG_KSU_SUSFS_SUS_SU=y
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
           CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_MANUAL_HOOK=n
-          CONFIG_KSU_HAS_MANUAL_HOOK=n
           EOF
           fi
 
+          # Config STRICT hanya untuk MAMBOSU
           if [ "$VARIANT" = "mambosu" ]; then
-            echo "✅ Adding Mambo Specific Configs (STRICT)..."
-            cat >> $TARGET_CONFIG <<EOF
+            cat >> $TARGET <<EOF
           CONFIG_KSU_THRONE_TRACKER_ALWAYS_THREADED=y
           CONFIG_KSU_LSM_SECURITY_HOOKS=y
           CONFIG_KSU_EXTRAS=y
-          CONFIG_KSU_TAMPER_SYSCALL_TABLE_y
+          CONFIG_KSU_TAMPER_SYSCALL_TABLE=y
           EOF
           fi
 
       - name: Setup Version Name
         working-directory: gki/common
         run: |
-          NAME="${{ github.event.inputs.kernel_name }}"
-          HZ_VAL="${{ matrix.hz_variant }}"
-          rm -f localversion*
-          sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
-          echo "-$NAME-$HZ_VAL" > localversion
+          echo "-${{ github.event.inputs.kernel_name }}-${{ matrix.hz_variant }}" > localversion
 
-      # --- SETUP CLANG 17 ---
+      # --- CLANG 17 SETUP ---
       - name: Setup Compiler (Clang 17)
         working-directory: gki
         run: |
-          echo "⬇️ Downloading Clang 17 (r487747c)..."
-          mkdir -p prebuilts-master/clang/host/linux-x86
-          TARGET_DIR="prebuilts-master/clang/host/linux-x86/clang-r487747c"
-          mkdir -p "$TARGET_DIR"
-          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r1/clang-r487747c.tar.gz"
-          curl -L "$CLANG_URL" | tar -xz -C "$TARGET_DIR"
+          mkdir -p prebuilts-master/clang/host/linux-x86/clang-r487747c
+          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r1/clang-r487747c.tar.gz" | tar -xz -C prebuilts-master/clang/host/linux-x86/clang-r487747c
 
       - name: Execute Build
         working-directory: gki
         run: |
-          echo "🚀 Starting Compilation for ${{ matrix.ksu_variant }} @ ${{ matrix.hz_variant }}Hz with Clang 17..."
-          
           export KMI_SYMBOL_LIST_STRICT_MODE=0
-          export KMI_ENFORCED=0
-          export TRIM_NONLISTED_KMI=0
-          
-          # Force path Clang 17
-          LTO=thin \
-          LLVM=1 \
-          LLVM_IAS=1 \
+          LTO=thin LLVM=1 LLVM_IAS=1 \
           CLANG_PREBUILT_BIN=prebuilts-master/clang/host/linux-x86/clang-r487747c/bin \
           KCFLAGS="-O3 -Wno-error=implicit-function-declaration -Wno-error=unused-command-line-argument" \
-          BUILD_CONFIG=common/build.config.gki.aarch64 \
-          build/build.sh
+          BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
-      - name: Packaging anykernel & Release
+      - name: Packaging & Release
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          FULL_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
           DATE=$(date +"%Y%m%d")
-          KNAME="${{ github.event.inputs.kernel_name }}"
-          [ -z "$KNAME" ] && KNAME="Zixine"
           VARIANT="${{ matrix.ksu_variant }}"
-          HZ_VAL="${{ matrix.hz_variant }}"
-          ZIP_NAME="AK3-${KNAME}-${VARIANT}-${HZ_VAL}hz-${DATE}.zip"
+          HZ="${{ matrix.hz_variant }}"
+          ZIP_NAME="AK3-${{ github.event.inputs.kernel_name }}-${VARIANT}-${HZ}hz-${DATE}.zip"
           
-          AK3_REPO="https://github.com/zixine/anykernel" 
-          git clone -q --depth=1 "$AK3_REPO" -b main anykernel
-          
+          git clone -q --depth=1 "https://github.com/zixine/anykernel" -b main anykernel
           IMG=$(find gki/out -name "Image" -type f | head -n 1)
-          if [ -z "$IMG" ]; then echo "❌ Error: Image not found!"; exit 1; fi
           cp "$IMG" anykernel/
           
-          sed -i "s|kernel.string=.*|kernel.string=${FULL_VER} (${HZ_VAL}Hz) by Zixine|g" anykernel/anykernel.sh
           cd anykernel
-          chmod +x anykernel.sh tools/magiskboot tools/ak3-core.sh META-INF/com/google/android/update-binary
           zip -r9 "../$ZIP_NAME" * -x .git .gitignore README.md
           cd ..
           
-          TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
-          RELEASE_TAG="${KNAME}-${DATE}"
-          
-          gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine ${DATE}" --notes "Automated Matrix Build" --prerelease=false 2>/dev/null || true
-          gh release upload "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --clobber
+          gh release create "${{ github.event.inputs.kernel_name }}-${DATE}" "$ZIP_NAME" --repo "zixine/Kernel-GKI-12-5.10-release" --title "Zixine Build ${DATE}" --notes "Matrix Build Clang 17" --prerelease=false 2>/dev/null || true
+          gh release upload "${{ github.event.inputs.kernel_name }}-${DATE}" "$ZIP_NAME" --repo "zixine/Kernel-GKI-12-5.10-release" --clobber
 
       - name: Archive Build Log
         if: always()
@@ -335,4 +216,3 @@ jobs:
         with:
           name: build-log-${{ matrix.ksu_variant }}-${{ matrix.hz_variant }}
           path: gki/out/android12-5.10/common/build.log
-          if-no-files-found: warn

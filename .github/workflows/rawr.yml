@@ -166,6 +166,10 @@ jobs:
           CONFIG_PM_WAKELOCKS=y
           # CONFIG_STACKPROTECTOR_PER_TASK is not set
           CONFIG_LOCALVERSION_AUTO=n
+          CONFIG_PSI=y
+          CONFIG_PSI_DEFAULT_DISABLED=n
+          CONFIG_MEMCG=y
+          CONFIG_MEMCG_SWAP=y CONFIG_ANDROID_LOW_MEMORY_KILLER=y
           EOF
 
           # 2. Config Khusus KSU & SUSFS (Hanya jika BUKAN Vanilla)
@@ -227,7 +231,7 @@ jobs:
         run: |
           mkdir -p prebuilts-master/clang/host/linux-x86
           ACTUAL_VER="clang-r416183b"
-          ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz"
+          ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r1/clang-r487747c.tar.gz"
           EXPECTED_VER="clang-r563880b"
           mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
           curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
@@ -242,7 +246,9 @@ jobs:
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export KMI_ENFORCED=0
           export TRIM_NONLISTED_KMI=0
-          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+          LTO=thin LLVM=1 LLVM_IAS=1 \
+          KCFLAGS="-O3 -Wno-error=implicit-function-declaration -Wno-error=unused-command-line-argument" \
+          BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       # --- PACKAGING & RELEASE (Dioptimalkan untuk Matrix) ---
       - name: Packaging anykernel & Release

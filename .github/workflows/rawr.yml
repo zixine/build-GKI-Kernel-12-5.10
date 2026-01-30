@@ -169,7 +169,8 @@ jobs:
           CONFIG_PSI=y
           CONFIG_PSI_DEFAULT_DISABLED=n
           CONFIG_MEMCG=y
-          CONFIG_MEMCG_SWAP=y CONFIG_ANDROID_LOW_MEMORY_KILLER=y
+          CONFIG_MEMCG_SWAP=y
+          CONFIG_ANDROID_LOW_MEMORY_KILLER=y
           EOF
 
           # 2. Config Khusus KSU & SUSFS (Hanya jika BUKAN Vanilla)

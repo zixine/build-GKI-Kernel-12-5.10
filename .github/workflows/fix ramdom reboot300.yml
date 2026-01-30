@@ -71,106 +71,39 @@ jobs:
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam (SKIP)."
 
       # --- MATRIX SETUP KSU & SUSFS ---
-      - name: Setup Variant (${{ matrix.variant }})
+      - name: Setup KSU (${{ matrix.ksu_variant }}) & SUSFS
         working-directory: gki/common
         run: |
-          VARIANT="${{ matrix.variant }}"
+          VARIANT="${{ matrix.ksu_variant }}"
           echo "⚙️ Setting up for variant: $VARIANT"
 
-          # Fungsi untuk membersihkan KSU lama
-          clean_ksu() {
-            echo "🧹 Cleaning existing KSU..."
-            for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
-              if [ -d $KSU_PATH ]; then
-                rm -rf $KSU_PATH
-                KSU_DIR=$(dirname "$KSU_PATH")
-                [ -f "$KSU_DIR/Kconfig" ] && sed -i '/kernelsu/d' $KSU_DIR/Kconfig
-                [ -f "$KSU_DIR/Makefile" ] && sed -i '/kernelsu/d' $KSU_DIR/Makefile
-              fi
-            done
-          }
+          if [ "$VARIANT" = "vanila" ]; then
+            echo "🍦 Vanilla Build: Skipping KSU and SUSFS setup."
+            exit 0
+          fi
 
-          # ---------------------------------------------------------
-          # 1. SUKISU (ReSukiSU + SUSFS)
-          # ---------------------------------------------------------
-          if [ "$VARIANT" = "sukisu" ]; then
-            echo "[Sukisu] Setup ReSukiSU & SUSFS"
-            curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
-            
-            # Setup SUSFS
-            git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-            rm -rf sus/.git
-            susfs=sus/kernel_patches
-            cp -r $susfs/fs .
-            cp -r $susfs/include .
-            cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-            echo "[✓] SUSFS patched for Sukisu"
-
-          # ---------------------------------------------------------
-          # 2. WILDKSU (Wild + Fixes + SUSFS)
-          # ---------------------------------------------------------
-          elif [ "$VARIANT" = "wildksu" ]; then
-            clean_ksu
-            echo "🟣 Mode: Wild KernelSU"
-            rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU
+          # 1. Setup KSU Method
+          if [ "$VARIANT" = "wild" ]; then
+            echo "🐯 Applying Wild KSU..."
             curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
-
-            # Setup SusFS
-            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 susfs-git
-            cp -r susfs-git/kernel_patches/include/* include/
-            cp -r susfs-git/kernel_patches/fs/* fs/
-            cp susfs-git/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
-            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || true
-            echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
-            echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-            echo "gasken aman susfs nya"
-
-          # ---------------------------------------------------------
-          # 3. MAMBOSU (Rsuntk + Kprobes Only + No SUSFS)
-          # ---------------------------------------------------------
-          elif [ "$VARIANT" = "mambosu" ]; then
-            clean_ksu
-            echo "🧩 Setup KernelSU dan Hook Method (Kprobes Only)"
-          for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
-            if [ -d $KSU_PATH ]; then
-              echo "KernelSU driver found in $KSU_PATH, Removing..."
-              KSU_DIR=$(dirname "$KSU_PATH")
-              [ -f "$KSU_DIR/Kconfig" ] && sed -i '/kernelsu/d' $KSU_DIR/Kconfig
-              [ -f "$KSU_DIR/Makefile" ] && sed -i '/kernelsu/d' $KSU_DIR/Makefile
-              rm -rf $KSU_PATH
-            fi
-          done
-          echo "✅ Existing KernelSU drivers removed"
-          echo "➡️ Menambahkan KernelSU"
-          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
-          echo "✅ KernelSU added"
-          # 3. Apply Manager Support Patch manager MamboSU
-          echo "🛠️ Applying MamboSU Manager Support Patch..."
-          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/15ddb8c469eab27491d5bb0f8f66b7fe2c15d0d7/kernel-patches/ksu/rksu-add-mambosu-manager-support.patch" -o /tmp/rksu_manager.patch
-          cd KernelSU
-          patch -p1 < /tmp/rksu_manager.patch
-          cd ..
-          echo "✅ Manager Patch Applied"
-          
-          # --- FIX: Cek file Kbuild sebelum menjalankan sed untuk menghindari error ---
-          if [ -f "drivers/kernelsu/Kbuild" ]; then
-            sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-            echo "✅ Kbuild patched."
-          else
-            echo "⚠️ File Kbuild tidak ditemukan, melewati patching."
+          elif [ "$VARIANT" = "sukisu" ]; then
+            echo "🍡 Applying SukiSU..."
+            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s tmp-builtin
+          elif [ "$VARIANT" = "resukisu" ]; then
+            echo "🔄 Applying ReSukiSU..."
+            curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
           fi
-          # -------------------------------------------------------------------------
-          echo "➡️ Menggunakan metode Kprobes Hook (Standar)"
-          echo "✅ Kprobes setup selesai"
 
-          # ---------------------------------------------------------
-          # 4. VANILA (No KSU + No SUSFS)
-          # ---------------------------------------------------------
-          elif [ "$VARIANT" = "vanila" ]; then
-            clean_ksu
-            echo "[Vanila] Skipping KSU setup. Building clean kernel."
-          fi
+          # 2. Setup SUSFS (Hanya jika bukan Vanilla)
+          echo "🛡️ Setting up SUSFS..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+          rm -rf sus/.git
+          susfs=sus/kernel_patches
+          cp -r $susfs/fs .
+          cp -r $susfs/include .
+          cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+          echo "[✓] SUSFS patched"
 
       # --- APPLY ALL CRITICAL FIXES ---
       - name: Apply Critical Fixes
@@ -223,13 +156,12 @@ jobs:
           CONFIG_FS_VERITY=y
           CONFIG_PM_AUTOSLEEP=y
           CONFIG_PM_WAKELOCKS=y
+          # CONFIG_STACKPROTECTOR_PER_TASK is not set
+          CONFIG_LOCALVERSION_AUTO=n
           CONFIG_PSI=y
           CONFIG_PSI_DEFAULT_DISABLED=n
           CONFIG_MEMCG=y
-          CONFIG_MEMCG_SWAP=y
-          CONFIG_ANDROID_LOW_MEMORY_KILLER=y
-          # CONFIG_STACKPROTECTOR_PER_TASK is not set
-          CONFIG_LOCALVERSION_AUTO=n
+          CONFIG_MEMCG_SWAP=y CONFIG_ANDROID_LOW_MEMORY_KILLER=y
           EOF
 
           # 2. Config Khusus KSU & SUSFS (Hanya jika BUKAN Vanilla)
@@ -259,21 +191,10 @@ jobs:
             CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
             CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
             CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-
-            # 4. Config Khusus MAMBOSU
-          if [ "$VARIANT" = "mambosu" ]; then
-            echo "✅ Adding Mambo Specific Configs..."
-            cat >> $TARGET_CONFIG <<EOF
-          CONFIG_KSU_THRONE_TRACKER_ALWAYS_THREADED=y
-          CONFIG_KSU_LSM_SECURITY_HOOKS=y
-          CONFIG_KSU_EXTRAS=y
-          CONFIG_KSU_TAMPER_SYSCALL_TABLE_y
-          EOF
-          fi
-          
+            
             # Additional Hooks
-          CONFIG_KSU_MANUAL_HOOK=n
-          CONFIG_KSU_HAS_MANUAL_HOOK=n
+            CONFIG_KSU_MANUAL_HOOK=n
+            CONFIG_KSU_HAS_MANUAL_HOOK=n
           EOF
           else
             echo "🍦 Vanilla selected: NOT injecting KSU/SUSFS configs."
@@ -297,13 +218,13 @@ jobs:
           echo "✅ Version name cleaned. New localversion content:"
           cat localversion
 
-      - name: Setup Compiler (Clang 22)
+      - name: Setup Compiler (Clang 12)
         working-directory: gki
         run: |
           mkdir -p prebuilts-master/clang/host/linux-x86
-          ACTUAL_VER="clang-r416183b"
-          ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/105aba85d97a53d364585ca755752dae054b49e8/clang-r584948b.tar.gz"
-          EXPECTED_VER="clang-r584948b"
+          ACTUAL_VER="clang-r487747c"
+          ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r1/clang-r487747c.tar.gz"
+          EXPECTED_VER="clang-r563880b"
           mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
           curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
           cd prebuilts-master/clang/host/linux-x86
@@ -317,7 +238,9 @@ jobs:
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export KMI_ENFORCED=0
           export TRIM_NONLISTED_KMI=0
-          LTO=thin KCFLAGS="-O3 -Wno-error=implicit-function-declaration" BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+          LTO=thin LLVM=1 LLVM_IAS=1 \
+          KCFLAGS="-O3 -Wno-error=implicit-function-declaration -Wno-error=unused-command-line-argument" \
+          BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       # --- PACKAGING & RELEASE (Dioptimalkan untuk Matrix) ---
       - name: Packaging anykernel & Release
@@ -357,7 +280,7 @@ jobs:
           
           # Release ke Repo Tujuan
           TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
-          RELEASE_TAG="${KNAME}"
+          RELEASE_TAG="${KNAME}-${DATE}"
           
           # LOGIKA AMAN UNTUK MATRIX (Race Condition Proof)
           # Coba create release dulu. Jika gagal (karena sudah ada), otomatis lari ke upload.

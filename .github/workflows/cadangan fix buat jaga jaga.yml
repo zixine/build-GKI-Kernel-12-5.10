@@ -99,16 +99,13 @@ jobs:
           }
 
           if [ "$VARIANT" = "sukisu" ]; then
-            echo "[6/12] Setup ReSukiSU & SUSFS"
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
-          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-          rm -rf sus/.git
-          susfs=sus/kernel_patches
-          cp -r $susfs/fs .
-          cp -r $susfs/include .
-          cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-          echo "[✓] SUSFS patched"
+            rm -rf drivers/staging/kernelsu
+            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s tmp-builtin
+            git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+            rm -rf sus/.git
+            susfs=sus/kernel_patches
+            cp -r $susfs/fs . && cp -r $susfs/include . && cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
           
           elif [ "$VARIANT" = "wild" ]; then
             clean_ksu
@@ -151,8 +148,11 @@ jobs:
       - name: Replace 300Hz with 500Hz
         working-directory: gki/common
         run: |
-          sed -i 's/config HZ_300/config HZ_500/g; s/bool "300 HZ"/bool "500 HZ"/g; s/default 300 if HZ_300/default 500 if HZ_500/g' kernel/Kconfig.hz
-
+          KCONFIG_HZ="kernel/Kconfig.hz"
+          sed -i 's/config HZ_300/config HZ_500/g' "$KCONFIG_HZ"
+          sed -i 's/bool "300 HZ"/bool "500 HZ"/g' "$KCONFIG_HZ"
+          sed -i 's/default 300 if HZ_300/default 500 if HZ_500/g' "$KCONFIG_HZ"
+          
       - name: Clean Build Config Line
         run: sed -i '2d' gki/common/build.config.gki
         
@@ -164,8 +164,6 @@ jobs:
           
           echo "🧹 Sanitizing defconfig before injection..."
           sed -i '/CONFIG_STACKPROTECTOR_PER_TASK/d' $TARGET_CONFIG
-          sed -i '/CONFIG_CFI_CLANG/d' $TARGET_CONFIG
-          sed -i '/CONFIG_SHADOW_CALL_STACK/d' $TARGET_CONFIG
           sed -i '/CONFIG_HZ_/d' $TARGET_CONFIG
           sed -i '/CONFIG_BPF_JIT/d' $TARGET_CONFIG
           sed -i '/CONFIG_KSU/d' $TARGET_CONFIG
@@ -175,8 +173,6 @@ jobs:
           cat >> $TARGET_CONFIG <<EOF
           # Anti-Random Reboot Guard (CRITICAL for MT6789)
           CONFIG_STACKPROTECTOR_PER_TASK=n
-          CONFIG_CFI_CLANG=n
-          CONFIG_SHADOW_CALL_STACK=n
 
           # Performance & Smoothness
           CONFIG_HZ_500=y
@@ -206,27 +202,32 @@ jobs:
           if [ "$VARIANT" != "mambo" ]; then
             echo "💉 Injecting SUSFS for $VARIANT..."
             cat >> $TARGET_CONFIG <<EOF
-            CONFIG_KSU_SUSFS=y
-            CONFIG_KSU_SUSFS_SUS_SU=y
-            CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-            CONFIG_KSU_SUSFS_SUS_PATH=y
-            CONFIG_KSU_SUSFS_SUS_MOUNT=y
-            CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-            CONFIG_KSU_SUSFS_SUS_KSTAT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-            CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-            CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-            CONFIG_KSU_SUSFS_ENABLE_LOG=y
-            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-            CONFIG_KSU_MANUAL_HOOK=n
-            CONFIG_KPROBES=y
-            CONFIG_HAVE_KPROBES=y
-            CONFIG_KRETPROBES=y
-            CONFIG_KPROBE_EVENTS=y
+          CONFIG_KSU_SUSFS_SUS_SU=n
+          CONFIG_KSU_SYSCALL_HOOK=n
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_MANUAL_HOOK=n
+          CONFIG_KSU_HAS_MANUAL_HOOK=n
+          # GKI requires kprobes symbols to be present
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KRETPROBES=y
+          CONFIG_KPROBE_EVENTS=y
           EOF
           else
             echo "💉 Injecting Mambo Specific Configs..."
@@ -250,27 +251,26 @@ jobs:
           echo "✅ Version set to: -$CLEAN_NAME"
 
       # --- COMPILER SETUP (Sesuai build.config.common) ---
-      - name: Setup Compiler (Clang 17)
+      - name: Setup Compiler (Clang 12)
         working-directory: gki
         run: |
-          CLANG_DIR="prebuilts-master/clang/host/linux-x86/clang-r563880b"
-          mkdir -p "$CLANG_DIR"
-          echo "📥 Downloading Clang 17 (Stable Engine)..."
-          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r1/clang-r487747c.tar.gz" | tar -xz -C "$CLANG_DIR"
+          mkdir -p prebuilts-master/clang/host/linux-x86
+          ACTUAL_VER="clang-r487747c"
+          ACTUAL_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r1/clang-r487747c.tar.gz"
+          EXPECTED_VER="clang-r563880b"
+          mkdir -p "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
+          curl -L "$ACTUAL_URL" | tar -xz -C "prebuilts-master/clang/host/linux-x86/$ACTUAL_VER"
+          cd prebuilts-master/clang/host/linux-x86
+          rm -rf "$EXPECTED_VER"
+          ln -s "$ACTUAL_VER" "$EXPECTED_VER"
 
       - name: Execute Build
         working-directory: gki
         run: |
-          # Bersihkan staging agar tidak ada error File Exists dari varian sebelumnya
-          rm -rf out/android12-5.10/staging
-          
+          echo "🚀 Starting Compilation for ${{ matrix.ksu_variant }}..."
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export KMI_ENFORCED=0
           export TRIM_NONLISTED_KMI=0
-          
-          # Inject PATH absolut ke compiler yang baru didownload
-          export PATH=$GITHUB_WORKSPACE/gki/prebuilts-master/clang/host/linux-x86/clang-r563880b/bin:$PATH
-          
           LTO=thin LLVM=1 LLVM_IAS=1 \
           KCFLAGS="-O3 -Wno-error=implicit-function-declaration -Wno-error=unused-command-line-argument" \
           BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
@@ -281,25 +281,28 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          FULL_VER=$(make -s kernelversion -C gki/common | tr -d '\\n\\r')
+          # Ambil Base Version dari Makefile
+          BASE_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
+          FULL_VER=$(make -s kernelversion -C gki/common | tr -d '\n\r')
           DATE=$(date +"%Y%m%d")
+          
+          # Ambil nama dari Input User
+          KNAME="${{ github.event.inputs.kernel_name }}"
+          [ -z "$KNAME" ] && KNAME="Zixine"
+          
+          # Tambahkan Varian Matrix ke nama file ZIP
           VARIANT="${{ matrix.ksu_variant }}"
-          CLEAN_KNAME=$(echo "${{ github.event.inputs.kernel_name }}" | tr -d '[:space:]')
-          ZIP_NAME="AK3-500hz-${VARIANT}-${CLEAN_KNAME}-${DATE}.zip"
+          ZIP_NAME="AK3-500hz-${VARIANT}-${KNAME}.zip"
           
-          echo "📦 Packaging variant: $VARIANT"
-          git clone -q --depth=1 "https://github.com/zixine/anykernel" -b main anykernel
+          AK3_REPO="https://github.com/zixine/anykernel" 
+          git clone -q --depth=1 "$AK3_REPO" -b main anykernel
           
-          # Cari Image.lz4 dulu (prioritas MT6789), fallback ke Image biasa
-          IMG=$(find gki/out -name "Image.lz4" -type f | head -n 1)
-          if [ -z "$IMG" ]; then IMG=$(find gki/out -name "Image" -type f | head -n 1); fi
-          
-          if [ -z "$IMG" ]; then
-            echo "❌ Error: Kernel Image not found!"
-            exit 1
-          fi
+          IMG=$(find gki/out -name "Image" -type f | head -n 1)
+          if [ -z "$IMG" ]; then echo "❌ Error: Image not found!"; exit 1; fi
           
           cp "$IMG" anykernel/
+          
+          # Set kernel string di anykernel.sh
           sed -i "s|kernel.string=.*|kernel.string=${FULL_VER} by Zixine|g" anykernel/anykernel.sh
           
           cd anykernel
@@ -307,14 +310,18 @@ jobs:
           zip -r9 "../$ZIP_NAME" * -x .git .gitignore README.md
           cd ..
           
+          # Release ke Repo Tujuan
           TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
-          RELEASE_TAG="${CLEAN_KNAME}-${DATE}"
+          RELEASE_TAG="${KNAME}-${DATE}"
           
-          echo "🚀 Uploading Release: $RELEASE_TAG"
-          if ! gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine ${DATE}" --notes "Varian Build: ${VARIANT}" --prerelease=false 2>/dev/null; then
+          echo "🚀 Attempting to create or upload to release: $RELEASE_TAG"
+          
+          if ! gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine ${DATE}" --notes "Automated Matrix Build" --prerelease=false 2>/dev/null; then
+            echo "⚠️ Release creation failed (Release might already exist). Attempting to upload to existing release..."
             gh release upload "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --clobber
+          else
+            echo "✅ Release created and asset uploaded successfully."
           fi
-
       - name: Archive Build Log
         if: always()
         uses: actions/upload-artifact@v4

@@ -90,9 +90,13 @@ jobs:
           if [ "$VARIANT" = "sukisu" ]; then
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
             git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-            cp -r sus/kernel_patches/fs .
-            cp -r sus/kernel_patches/include .
-            patch -p1 < sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
+            rm -rf sus/.git
+            susfs=sus/kernel_patches
+            cp -r $susfs/fs .
+            cp -r $susfs/include .
+            cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+          echo "[✓] SUSFS patched"
           elif [ "$VARIANT" = "wild" ]; then
             clean_ksu
             curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild

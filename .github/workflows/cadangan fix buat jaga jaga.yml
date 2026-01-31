@@ -179,7 +179,7 @@ jobs:
 
           if [ "$VARIANT" != "mambo" ]; then
             cat >> $TARGET_CONFIG <<EOF
-            CONFIG_KSU=y
+          CONFIG_KSU=y
           CONFIG_KPM=y
           CONFIG_KSU_SUSFS_SUS_SU=n
           CONFIG_KSU_SYSCALL_HOOK=n

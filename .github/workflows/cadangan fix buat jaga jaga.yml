@@ -167,7 +167,6 @@ jobs:
           sed -i '/CONFIG_CFI_CLANG/d' $TARGET_CONFIG
           sed -i '/CONFIG_SHADOW_CALL_STACK/d' $TARGET_CONFIG
           sed -i '/CONFIG_HZ_/d' $TARGET_CONFIG
-          sed -i '/CONFIG_RCU_BOOST/d' $TARGET_CONFIG
           sed -i '/CONFIG_BPF_JIT/d' $TARGET_CONFIG
           sed -i '/CONFIG_KSU/d' $TARGET_CONFIG
           sed -i '/CONFIG_NO_HZ/d' $TARGET_CONFIG
@@ -186,12 +185,6 @@ jobs:
           CONFIG_DEFAULT_BBR=y
           CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
           
-          # RCU Tweaks
-          CONFIG_RCU_EXPERT=y
-          CONFIG_RCU_BOOST=y
-          CONFIG_RCU_BOOST_DELAY=100
-          CONFIG_RCU_NOCB_CPU=y
-
           # BPF Performance
           CONFIG_BPF_SYSCALL=y
           CONFIG_BPF_JIT=y

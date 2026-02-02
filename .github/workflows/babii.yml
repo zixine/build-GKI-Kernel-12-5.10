@@ -95,7 +95,13 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           # Force accept Kprobes warning
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-
+          
+          # Apply All Managers Patch
+            echo "🔧 Applying Patch for All Managers Support..."
+            curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/refs/heads/6.x/kernel-patches/ksu/ksun-add-more-managers-support.patch" -o /tmp/ksun-add-more-managers-support.patch
+            cd KernelSU-Next && patch -p1 < /tmp/ksun-add-more-managers-support.patch && cd ..
+            echo "✅ All Managers Patch Applied"
+            
           # 3. Setup SUSFS (Metode Copy User + Safety Net)
           echo "📥 Setting up SUSFS..."
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus

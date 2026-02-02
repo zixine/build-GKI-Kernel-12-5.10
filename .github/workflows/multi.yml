@@ -4,45 +4,55 @@ on:
   workflow_dispatch:
     inputs:
       kernel_name:
-        description: 'Nama Kernel (Contoh: Zixine-Elysium)'
+        description: 'Nama Kernel'
         required: true
         default: 'Zixine-Elysium-inline-1.5'
         type: string
 
-permissions:
-  contents: write
-
 jobs:
-  build:
-    name: Build Kernel
+  build-multimanager:
+    name: Build MULTIMANAGER
     runs-on: ubuntu-22.04
-
+    permissions:
+      contents: write
+    
     steps:
-      - name: Free disk space
+      - name: Extreme Disk Cleanup
+        run: |
+          echo "🧹 Membersihkan sampah runner..."
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
+
+      - name: Maximize Build Space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 8192
-          swap-size-mb: 10240
+          root-reserve-mb: 2048
+          swap-size-mb: 8192
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
-      - name: Checkout Repository
+      - name: Fetch Source Code
         uses: actions/checkout@v4
 
-      - name: Configure Git
+      - name: Initialize Git Identity
         run: |
-          git config --global user.name "titit"
-          git config --global user.email "contoh@gmail.com"
+          git config --global user.name "zixine"
+          git config --global user.email "waheid005@gmail.com"
 
-      - name: Install build tools
+      - name: Dependency Installation
         run: |
-          sudo apt update && sudo apt upgrade -y
-          sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
+          sudo apt-get update
+          sudo apt-get install -y git curl repo build-essential bc bison flex libssl-dev \
             libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
-            
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
       - name: Init & Sync GKI
         run: |
           mkdir gki && cd gki
@@ -255,7 +265,7 @@ jobs:
           TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
           RELEASE_TAG="${KNAME}-${DATE}"
           
-          if ! gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine ${DATE}" --notes "Automated Multimanager Build" --prerelease=false 2>/dev/null; then
+          if ! gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine ${DATE}" --notes "Automated Multimanager Build" 2>/dev/null; then
             gh release upload "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --clobber
           fi
 

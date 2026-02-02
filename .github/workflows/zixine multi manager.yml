@@ -85,6 +85,7 @@ jobs:
 
       # --- SETUP KSU & SUSFS (FIXED) ---
       - name: Setup Root Variant & Inject Configs
+        if: matrix.variant == 'MULTIMANAGER'
         id: setup_root
         working-directory: gki/common
         run: |
@@ -98,8 +99,21 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev_susfs          
           # Force accept Kprobes (kadang config check gagal di GKI)
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-
-          # 3. Setup SUSFS (Source Code)
+         
+          # 3. Apply Patch Manager Support (Opsional tapi direkomendasikan untuk KSU-Next)
+          echo "🔧 Applying Patch for All Managers Support..."
+          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/refs/heads/6.x/kernel-patches/ksu/ksun-add-more-managers-support.patch" -o /tmp/ksun-add-more-managers-support.patch
+          # Patch ini harus diaplikasikan KE DALAM folder KernelSU-Next
+          if [ -d "KernelSU-Next" ]; then
+             cd KernelSU-Next
+             patch -p1 < /tmp/ksun-add-more-managers-support.patch || echo "⚠️ Manager patch failed, skipping..."
+             cd ..
+          elif [ -d "drivers/kernelsu" ]; then
+             cd drivers/kernelsu
+             patch -p1 < /tmp/ksun-add-more-managers-support.patch || echo "⚠️ Manager patch failed, skipping..."
+             cd ..
+             
+          # 4. Setup SUSFS (Source Code)
           echo "📥 Cloning SUSFS..."
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
           
@@ -112,19 +126,6 @@ jobs:
           # Kita apply patch 50_add_susfs... agar folder fs/susfs/ dikenali oleh build system
           cp sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
           patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || echo "⚠️ Patch mungkin sudah terpasang atau ada konflik ringan."
-
-          # 4. Apply Patch Manager Support (Opsional tapi direkomendasikan untuk KSU-Next)
-          echo "🔧 Applying Patch for All Managers Support..."
-          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/refs/heads/6.x/kernel-patches/ksu/ksun-add-more-managers-support.patch" -o /tmp/ksun-add-more-managers-support.patch
-          # Patch ini harus diaplikasikan KE DALAM folder KernelSU-Next
-          if [ -d "KernelSU-Next" ]; then
-             cd KernelSU-Next
-             patch -p1 < /tmp/ksun-add-more-managers-support.patch || echo "⚠️ Manager patch failed, skipping..."
-             cd ..
-          elif [ -d "drivers/kernelsu" ]; then
-             cd drivers/kernelsu
-             patch -p1 < /tmp/ksun-add-more-managers-support.patch || echo "⚠️ Manager patch failed, skipping..."
-             cd ..
           fi
           
           # Bersihkan sisa clone
@@ -211,16 +212,14 @@ jobs:
           CONFIG_MEMCG=y
           CONFIG_MEMCG_SWAP=y
           CONFIG_LOCALVERSION_AUTO=n
-          
-          # Base KSU Config
-          CONFIG_KSU=y
-          CONFIG_KPM=y
           EOF
 
-          # Inject SUSFS Config (ONLY IF VARIANT IS WILD)
+          # Inject SUSFS Config (ONLY IF VARIANT IS KSU)
           if [ "$VARIANT" == "MULTIMANAGER" ]; then
             echo "💉 Injecting SUSFS for $VARIANT..."
             cat >> $TARGET_CONFIG <<EOF
+          CONFIG_KSU=y
+          CONFIG_KPM=y
           CONFIG_KSU_SUSFS_SUS_SU=n
           CONFIG_KSU_SYSCALL_HOOK=n
           CONFIG_KSU_SUSFS=y
@@ -242,11 +241,6 @@ jobs:
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_MANUAL_HOOK=n
           CONFIG_KSU_HAS_MANUAL_HOOK=n
-          # GKI requires kprobes symbols to be present
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KRETPROBES=y
-          CONFIG_KPROBE_EVENTS=y
           EOF
           fi
 

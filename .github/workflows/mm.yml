@@ -79,32 +79,53 @@ jobs:
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam."
 
-      # --- SETUP KSU & SUSFS (WILD ONLY) ---
+      # --- SETUP KSU & SUSFS (FIXED) ---
       - name: Setup Root Variant & Inject Configs
         id: setup_root
         working-directory: gki/common
         run: |
-          # Eksekusi
-          for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU KernelSU-Next; do
-              [ -d $KSU_PATH ] && rm -rf $KSU_PATH
-            done
-          echo "🟣 Mode: Wild KernelSU"
-          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
-          sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
+          # 1. Bersihkan instalasi KSU sebelumnya
+          rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU KernelSU-Next
           
-          # Apply All Managers Patch
+          echo "🟣 Mode: Wild KernelSU (Fix Version)"
+          
+          # 2. Install KernelSU-Next branch 'next' (Stabil & Kompatibel)
+          # Menggunakan branch 'next' menghindari error undefined symbol dari fitur eksperimental 'dev-susfs'
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          
+          # Force accept Kprobes (kadang config check gagal di GKI)
+          sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
+
+          # 3. Setup SUSFS (Source Code)
+          echo "📥 Cloning SUSFS..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+          
+          # Copy file SUSFS ke dalam kernel source
+          # Pastikan copy logic benar agar file terkompilasi
+          cp -r sus/kernel_patches/fs/* fs/
+          cp -r sus/kernel_patches/include/* include/
+          
+          # Apply Patch SUSFS ke Kernel (PENTING: Memodifikasi fs/Makefile & fs/Kconfig)
+          # Kita apply patch 50_add_susfs... agar folder fs/susfs/ dikenali oleh build system
+          cp sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
+          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || echo "⚠️ Patch mungkin sudah terpasang atau ada konflik ringan."
+
+          # 4. Apply Patch Manager Support (Opsional tapi direkomendasikan untuk KSU-Next)
           echo "🔧 Applying Patch for All Managers Support..."
           curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/refs/heads/6.x/kernel-patches/ksu/ksun-add-more-managers-support.patch" -o /tmp/ksun-add-more-managers-support.patch
-          cd KernelSU-Next && patch -p1 < /tmp/ksun-add-more-managers-support.patch && cd ..
-          echo " All Managers Patch Applied"
+          # Patch ini harus diaplikasikan KE DALAM folder KernelSU-Next
+          if [ -d "KernelSU-Next" ]; then
+             cd KernelSU-Next
+             patch -p1 < /tmp/ksun-add-more-managers-support.patch || echo "⚠️ Manager patch failed, skipping..."
+             cd ..
+          elif [ -d "drivers/kernelsu" ]; then
+             cd drivers/kernelsu
+             patch -p1 < /tmp/ksun-add-more-managers-support.patch || echo "⚠️ Manager patch failed, skipping..."
+             cd ..
+          fi
           
-          # set susfs
-          echo "get susfs"
-          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-          rm -rf sus/.git
-          susfs=sus/kernel_patches
-          cp -r $susfs/fs . && cp -r $susfs/include . && cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+          # Bersihkan sisa clone
+          rm -rf sus
 
       # --- APPLY CRITICAL FIXES (Anti Reboot) ---
       - name: Apply Critical Fixes

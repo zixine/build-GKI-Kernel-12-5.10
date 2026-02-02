@@ -95,8 +95,8 @@ jobs:
           echo "🟣 Mode: Wild KernelSU (Fix Version)"
           
           # 2. Install KernelSU-Next branch 'next' (Stabil & Kompatibel)
-          # Menggunakan branch 'next' menghindari error undefined symbol dari fitur eksperimental 'dev-susfs'
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev_susfs          
+          # Menggunakan branch
+          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           # Force accept Kprobes (kadang config check gagal di GKI)
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
          

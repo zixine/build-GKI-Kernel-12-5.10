@@ -9,13 +9,12 @@ on:
         default: 'Zixine-Elysium-inline-1.5'
         type: string
 
-permissions:
-  contents: write
-
 jobs:
   build-vanilla:
     name: Build VANILLA
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     
     steps:
       - name: Extreme Disk Cleanup
@@ -211,7 +210,7 @@ jobs:
           TARGET_REPO="zixine/Kernel-GKI-12-5.10-release"
           RELEASE_TAG="${KNAME}-${DATE}"
           
-          if ! gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine ${DATE}" --notes "Automated Vanilla Build" --prerelease=false 2>/dev/null; then
+          if ! gh release create "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --title "Zixine ${DATE}" --notes "Automated Vanilla Build" 2>/dev/null; then
             gh release upload "$RELEASE_TAG" "$ZIP_NAME" --repo "$TARGET_REPO" --clobber
           fi
 

@@ -276,7 +276,7 @@ jobs:
           
           # Tambahkan Varian Matrix ke nama file ZIP
           VARIANT="wild"
-          ZIP_NAME="AK3-300hz-${VARIANT}-${KNAME}.zip"
+          ZIP_NAME="AK3-300hz-multimanager-${KNAME}.zip"
           
           AK3_REPO="https://github.com/zixine/anykernel" 
           git clone -q --depth=1 "$AK3_REPO" -b main anykernel

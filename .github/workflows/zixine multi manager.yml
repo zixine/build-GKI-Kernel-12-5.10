@@ -83,55 +83,48 @@ jobs:
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam."
 
-      # --- SETUP KSU & SUSFS (FIXED) ---
+     # --- SETUP KSU & SUSFS (FAIL-SAFE METHOD) ---
       - name: Setup Root Variant & Inject Configs
         if: matrix.variant == 'MULTIMANAGER'
-        id: setup_root
         working-directory: gki/common
         run: |
-          # 1. Bersihkan instalasi KSU sebelumnya
+          # 1. Bersihkan & Siapkan Environment
           rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU KernelSU-Next
           
-          echo "🟣 Mode: Wild KernelSU (Fix Version)"
-          
-          # 2. Install KernelSU-Next branch 'next' (Stabil & Kompatibel)
-          # Menggunakan branch
+          # 2. Setup KernelSU-Next (Gunakan script resmi agar bersih)
           curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
-          # Force accept Kprobes (kadang config check gagal di GKI)
+          # Force accept Kprobes warning
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-         
-          # 3. Apply Patch Manager Support (Opsional tapi direkomendasikan untuk KSU-Next)
-          echo "🔧 Applying Patch for All Managers Support..."
-          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/refs/heads/6.x/kernel-patches/ksu/ksun-add-more-managers-support.patch" -o /tmp/ksun-add-more-managers-support.patch
-          # Patch ini harus diaplikasikan KE DALAM folder KernelSU-Next
-          if [ -d "KernelSU-Next" ]; then
-             cd KernelSU-Next
-             patch -p1 < /tmp/ksun-add-more-managers-support.patch || echo "⚠️ Manager patch failed, skipping..."
-             cd ..
-          elif [ -d "drivers/kernelsu" ]; then
-             cd drivers/kernelsu
-             patch -p1 < /tmp/ksun-add-more-managers-support.patch || echo "⚠️ Manager patch failed, skipping..."
-             cd ..
-          fi
-             
-          # 4. Setup SUSFS (Source Code)
-          echo "📥 Cloning SUSFS..."
+
+          # 3. Setup SUSFS (Metode Copy User + Safety Net)
+          echo "📥 Setting up SUSFS..."
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
           
-          # Copy file SUSFS ke dalam kernel source
-          # Pastikan copy logic benar agar file terkompilasi
+          # Copy file secara eksplisit (wildcard * agar tidak nested folder)
           cp -r sus/kernel_patches/fs/* fs/
           cp -r sus/kernel_patches/include/* include/
           
-          # Apply Patch SUSFS ke Kernel (PENTING: Memodifikasi fs/Makefile & fs/Kconfig)
-          # Kita apply patch 50_add_susfs... agar folder fs/susfs/ dikenali oleh build system
+          # 4. THE FIX: Jangan cuma patch, paksa tulis config jika patch gagal!
+          # Coba patch dulu (mungkin ada modifikasi lain yang dibutuhkan)
           cp sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
-          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch || echo "⚠️ Patch mungkin sudah terpasang atau ada konflik ringan."
+          patch -p1 --forward < 50_add_susfs_in_gki-android12-5.10.patch || echo "⚠️ Patch hit conflict (expected on GKI), applying manual fix..."
           
+          # JAMINAN MUTU: Cek manual apakah SUSFS sudah terdaftar. Jika belum, injek sekarang.
+          # Cek fs/Makefile
+          if ! grep -q "obj-\$(CONFIG_KSU_SUSFS) += susfs/" fs/Makefile; then
+            echo "🔧 Manually injecting SUSFS into fs/Makefile..."
+            echo "obj-\$(CONFIG_KSU_SUSFS) += susfs/" >> fs/Makefile
+          fi
           
-          # Bersihkan sisa clone
-          rm -rf sus
+          # Cek fs/Kconfig
+          if ! grep -q "source \"fs/susfs/Kconfig\"" fs/Kconfig; then
+            echo "🔧 Manually injecting SUSFS into fs/Kconfig..."
+            # Masukkan sebelum 'endmenu' terakhir atau di akhir file
+            sed -i "/endmenu/i source \"fs/susfs/Kconfig\"" fs/Kconfig
+          fi
 
+          # Bersihkan sampah
+          rm -rf sus
       # --- APPLY CRITICAL FIXES (Anti Reboot) ---
       - name: Apply Critical Fixes
         working-directory: gki/common
@@ -219,29 +212,34 @@ jobs:
           if [ "$VARIANT" == "MULTIMANAGER" ]; then
             echo "💉 Injecting SUSFS for $VARIANT..."
             cat >> $TARGET_CONFIG <<EOF
-          CONFIG_KSU=y
-          CONFIG_KPM=y
-          CONFIG_KSU_SUSFS_SUS_SU=n
-          CONFIG_KSU_SYSCALL_HOOK=n
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_MANUAL_HOOK=n
-          CONFIG_KSU_HAS_MANUAL_HOOK=n
+           CONFIG_KSU=y
+           CONFIG_KPM=y
+           CONFIG_KSU_SUSFS_SUS_SU=n
+           CONFIG_KSU_SYSCALL_HOOK=n
+           CONFIG_KPROBES=y
+           CONFIG_KPROBE_EVENTS=y
+           CONFIG_OVERLAY_FS=y
+            
+           #SUSFS Configs
+           CONFIG_KSU_SUSFS=y
+           CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+           CONFIG_KSU_SUSFS_SUS_PATH=y
+           CONFIG_KSU_SUSFS_SUS_MOUNT=y
+           CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+           CONFIG_KSU_SUSFS_SUS_KSTAT=y
+           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+           CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+           CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+           CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+           CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+           CONFIG_KSU_SUSFS_ENABLE_LOG=y
+           CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+           CONFIG_KSU_MANUAL_HOOK=n
+           CONFIG_KSU_HAS_MANUAL_HOOK=n
           EOF
           fi
 

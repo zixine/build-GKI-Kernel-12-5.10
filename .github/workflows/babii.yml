@@ -131,6 +131,8 @@ jobs:
 
           # Bersihkan sampah
           rm -rf sus
+          #hapus cek uname
+          sed -i 's/#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME/#if 0 \/\* CONFIG_KSU_SUSFS_SPOOF_UNAME Disabled to fix build \*\//' drivers/kernelsu/supercalls.c
       # --- APPLY CRITICAL FIXES (Anti Reboot) ---
       - name: Apply Critical Fixes
         working-directory: gki/common

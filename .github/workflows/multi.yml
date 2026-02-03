@@ -74,7 +74,6 @@ jobs:
           curl -L "https://github.com/ramabondanp/android_kernel_common-5.10/commit/4fe04b60009e.patch" -o infinix_cam.patch
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam."
 
-      # --- BAGIAN INI KHUSUS MULTIMANAGER ---
       - name: Setup Root Variant & Inject Configs
         working-directory: gki/common
         run: |
@@ -85,27 +84,29 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
 
-          # UPDATE SINI: Tambahin -DCONFIG_SECURITY -DCONFIG_SECURITY_SELINUX
-          sed -i '1i ccflags-y += -I\$(srctree)/security/selinux -I\$(srctree)/security/selinux/include -I\$(objtree)/security/selinux/include -DCONFIG_SECURITY -DCONFIG_SECURITY_SELINUX' drivers/kernelsu/Kbuild
+          # 3. INJEKSI SAKTI (Fixed: Gak pake backslash di dalam kutip satu!)
+          # Ini ngebenerin flask.h DAN struct cred sekaligus
+          sed -i '1i ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(objtree)/security/selinux/include -DCONFIG_SECURITY -DCONFIG_SECURITY_SELINUX' drivers/kernelsu/Kbuild
           
-          # ... (Lanjutin script dummy header lu di bawahnya) ...
+          # 4. Dummy Headers (Pancingan Compiler)
           mkdir -p security/selinux/include
           touch security/selinux/include/flask.h
           touch security/selinux/include/av_permissions.h
-          # ...
           
-          # Apply All Managers Patch
+          # 5. Apply All Managers Patch
           echo "🔧 Applying Patch for All Managers Support..."
           curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/refs/heads/6.x/kernel-patches/ksu/ksun-add-more-managers-support.patch" -o /tmp/ksun-add-more-managers-support.patch
           cd KernelSU-Next && patch -p1 < /tmp/ksun-add-more-managers-support.patch && cd ..
           
-            
-          # Apply SUSFS
+          # 6. Apply SUSFS & DAFTARKAN KE MAKEFILE (WAJIB ADA INI, BABI!)
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
           rm -rf sus/.git
           susfs=sus/kernel_patches
           cp -r $susfs/fs . && cp -r $susfs/include . && cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
           patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+          
+          # INI YANG LU LUPA TADI! Daftarin SusFS biar kebaca
+          echo "obj-y += susfs/" >> fs/Makefile
 
       - name: Apply Critical Fixes
         working-directory: gki/common

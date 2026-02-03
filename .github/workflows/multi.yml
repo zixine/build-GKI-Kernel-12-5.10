@@ -89,6 +89,10 @@ jobs:
           echo "🔧 Applying Patch for All Managers Support..."
           curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/refs/heads/6.x/kernel-patches/ksu/ksun-add-more-managers-support.patch" -o /tmp/ksun-add-more-managers-support.patch
           cd KernelSU-Next && patch -p1 < /tmp/ksun-add-more-managers-support.patch && cd ..
+
+          # --- FIX FOR FLASK.H NOT FOUND ERROR ---
+          echo "🔧 Patching KernelSU Kbuild for SELinux headers..."
+          echo "ccflags-y += -I\$(srctree)/security/selinux -I\$(srctree)/security/selinux/include" >> drivers/kernelsu/Kbuild
             
           # Apply SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus

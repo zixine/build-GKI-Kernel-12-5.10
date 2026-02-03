@@ -74,28 +74,42 @@ jobs:
           patch -p1 < infinix_cam.patch || echo "✅ Patch kamera sudah tertanam."
 
       # --- BAGIAN INI KHUSUS MULTIMANAGER ---
-      - name: Setup Root Variant & Inject Configs
+      - name: Setup KernelSU-Next & Hook Method
         working-directory: gki/common
         run: |
-          # 1. Bersihkan & Siapkan Environment
-          rm -rf drivers/staging/kernelsu drivers/kernelsu KernelSU KernelSU-Next
-          
-          # 2. Setup KernelSU-Next
-          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
+          echo "Setup KernelSU dan Hook Method"
+          for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
+            if [ -d $KSU_PATH ]; then
+              echo "KernelSU driver found in $KSU_PATH, Removing..."
+              KSU_DIR=$(dirname "$KSU_PATH")
+              [ -f "$KSU_DIR/Kconfig" ] && sed -i '/kernelsu/d' $KSU_DIR/Kconfig
+              [ -f "$KSU_DIR/Makefile" ] && sed -i '/kernelsu/d' $KSU_DIR/Makefile
+              rm -rf $KSU_PATH
+            fi
+          done
+          echo "✅ Existing KernelSU drivers removed"
+          echo "➡️ Menambahkan KernelSU-Next"
+          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
+          echo "✅ KernelSU-Next added"
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-            
+          echo "✅ Kbuild patched."
           # Apply All Managers Patch
-          echo "🔧 Applying Patch for All Managers Support..."
-          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/refs/heads/6.x/kernel-patches/ksu/ksun-add-more-managers-support.patch" -o /tmp/ksun-add-more-managers-support.patch
-          cd KernelSU-Next && patch -p1 < /tmp/ksun-add-more-managers-support.patch && cd ..
+            echo "🔧 Applying Patch for All Managers Support..."
+            curl -LSs "https://raw.githubusercontent.com/Kingfinik98/gki-builder/refs/heads/6.x/kernel-patches/ksu/ksun-add-more-managers-support.patch" -o /tmp/ksun-add-more-managers-support.patch
+            cd KernelSU-Next && patch -p1 < /tmp/ksun-add-more-managers-support.patch && cd ..
+            echo "✅ All Managers Patch Applied"
+            echo "➡️ Cloning susfs4ksu (versi baru)"
+            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android12-5.10 sus
+            echo "✅ SUSFS berhasil diclone"
+            echo "🩹 Patching susfs4ksu"
+            susfs=sus/kernel_patches
+            cp -r $susfs/fs .
+            cp -r $susfs/include .
+            cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+            patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+            sed -i '1i#include <linux/stat.h>' include/linux/susfs.h
+            echo "✅ SUSFS patched"
             
-          # Apply SUSFS
-          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
-          rm -rf sus/.git
-          susfs=sus/kernel_patches
-          cp -r $susfs/fs . && cp -r $susfs/include . && cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
-          patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
-
       - name: Apply Critical Fixes
         working-directory: gki/common
         run: |

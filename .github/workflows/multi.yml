@@ -85,20 +85,14 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
 
-          # --- TRIK KOTOR ANTI-BEGO, BABI! ---
-          echo "🔧 Creating dummy headers to trick the compiler..."
+          # UPDATE SINI: Tambahin -DCONFIG_SECURITY -DCONFIG_SECURITY_SELINUX
+          sed -i '1i ccflags-y += -I\$(srctree)/security/selinux -I\$(srctree)/security/selinux/include -I\$(objtree)/security/selinux/include -DCONFIG_SECURITY -DCONFIG_SECURITY_SELINUX' drivers/kernelsu/Kbuild
+          
+          # ... (Lanjutin script dummy header lu di bawahnya) ...
           mkdir -p security/selinux/include
           touch security/selinux/include/flask.h
           touch security/selinux/include/av_permissions.h
-          
-          # Cek biar lu yakin foldernya ada
-          ls -R security/selinux/include
-          echo "🔧 Injecting Overkill SELinux Paths!"
-          # Kita tambahin -I$(objtree)/security/selinux (tanpa /include) dan jalur generated
-          sed -i '1i ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(objtree)/security/selinux -I$(objtree)/security/selinux/include' drivers/kernelsu/Kbuild
-          
-          # Trik Kotor: Kita bikin folder tujuannya dulu biar compiler gak komplain foldernya ga ada
-          mkdir -p ../out/security/selinux/include
+          # ...
           
           # Apply All Managers Patch
           echo "🔧 Applying Patch for All Managers Support..."

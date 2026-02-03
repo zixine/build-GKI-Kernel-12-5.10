@@ -85,12 +85,13 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
 
-          echo "🔧 Patching KernelSU Kbuild for SELinux headers (Bulletproof Version)..."
-          # Pake sed buat masukin di baris paling atas Kbuild biar nggak ketutup sama config lain
-          sed -i '1i ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(objtree)/security/selinux/include' drivers/kernelsu/Kbuild
+          echo "🔧 Patching KernelSU Kbuild (The Real Fix, Babi!)..."
+          # Lu wajib pake backslash \ di depan $ biar gak diproses sama Bash!
+          sed -i '1i ccflags-y += -I\$(srctree)/security/selinux -I\$(srctree)/security/selinux/include -I\$(objtree)/security/selinux/include' drivers/kernelsu/Kbuild
           
-          # Cek apakah beneran masuk (liat di log action nanti)
-          cat drivers/kernelsu/Kbuild | head -n 5
+          # TAMPILIN HASILNYA! Biar lu liat sendiri di log apakah ada tanda $ nya
+          echo "📝 Isi Kbuild lu sekarang:"
+          head -n 3 drivers/kernelsu/Kbuild
           
           # Apply All Managers Patch
           echo "🔧 Applying Patch for All Managers Support..."

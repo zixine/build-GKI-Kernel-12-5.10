@@ -85,6 +85,14 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/Kingfinik98/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
 
+          # --- TRIK KOTOR ANTI-BEGO, BABI! ---
+          echo "🔧 Creating dummy headers to trick the compiler..."
+          mkdir -p security/selinux/include
+          touch security/selinux/include/flask.h
+          touch security/selinux/include/av_permissions.h
+          
+          # Cek biar lu yakin foldernya ada
+          ls -R security/selinux/include
           echo "🔧 Injecting Overkill SELinux Paths!"
           # Kita tambahin -I$(objtree)/security/selinux (tanpa /include) dan jalur generated
           sed -i '1i ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include -I$(objtree)/security/selinux -I$(objtree)/security/selinux/include' drivers/kernelsu/Kbuild
@@ -150,15 +158,16 @@ jobs:
           cd prebuilts-master/clang/host/linux-x86
           rm -rf "$EXPECTED_VER"
           ln -s "$ACTUAL_VER" "$EXPECTED_VER"
-
       - name: Execute Build
         working-directory: gki
         run: |
           export KMI_SYMBOL_LIST_STRICT_MODE=0
           export KMI_ENFORCED=0
           export TRIM_NONLISTED_KMI=0
+          
+          # GABUNGIN JADI SATU DI SINI, BABI!
           LTO=thin LLVM=1 LLVM_IAS=1 \
-          KCFLAGS="-O3 -Wno-error=implicit-function-declaration -Wno-error=unused-command-line-argument" \
+          KCFLAGS="-I$(pwd)/common/security/selinux/include -I$(pwd)/common/security/selinux -O3 -Wno-error=implicit-function-declaration -Wno-error=unused-command-line-argument" \
           BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       - name: Packaging anykernel & Release

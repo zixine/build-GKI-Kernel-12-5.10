@@ -64,7 +64,8 @@ jobs:
           cd gki/common
           git remote add zixine https://github.com/zixine/android_kernel_common-5.10.git
           git fetch --depth=1 -j12 zixine
-          git checkout update-android12-5.10-staging
+          # Gunakan nama branch yang benar sesuai yang ada di remote
+          git checkout -B android12-5.10-staging zixine/android12-5.10-staging
           rm -rf drivers/staging/kernelsu
 
       - name: Apply Infinix GT 20 Pro Camera Fix

@@ -1,40 +1,30 @@
-name: Cleanup GitHub Actions Workspace
+name: Cleanup All Workflow Runs
 
 on:
-  workflow_dispatch: # Jalankan manual kalau lu ngerasa repo udah penuh sampah
+  workflow_dispatch:
 
 jobs:
-  cleanup:
+  delete-runs:
     runs-on: ubuntu-latest
     permissions:
       actions: write
-      contents: read
-
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT }}
     steps:
-      - name: Cleanup Workflow Artifacts
+      - name: Delete all workflow runs
         shell: bash
         run: |
-          echo "🧹 Menghapus semua artifact..."
-          artifacts=$(gh api -X GET /repos/${{ github.repository }}/actions/artifacts --paginate --jq '.artifacts[].id')
-          for art_id in $artifacts; do
-            gh api -X DELETE /repos/${{ github.repository }}/actions/artifacts/$art_id
-            echo "✅ Artifact $art_id dihapus."
-          done
-
-      - name: Cleanup Workflow Caches
-        shell: bash
-        run: |
-          echo "🧹 Menghapus semua cache..."
-          gh extension install actions/gh-actions-cache || true
+          echo "🚀 Menghapus semua histori run di repo ini..."
           
-          # Ambil daftar cache dan hapus satu per satu
-          caches=$(gh actions-cache list --repo ${{ github.repository }} | cut -f 1)
-          for cache_key in $caches; do
-            gh actions-cache delete $cache_key --repo ${{ github.repository }} --confirm
-            echo "✅ Cache $cache_key dihapus."
-          done
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-
-      - name: Done
-        run: echo "🔥 Semua sampah artifact dan cache berhasil dibersihkan."
+          # Ambil semua ID run kecuali yang sedang berjalan (current run)
+          run_ids=$(gh run list --limit 500 --jq ".[] | select(.id != ${{ github.run_id }}) | .id")
+          
+          if [ -z "$run_ids" ]; then
+            echo "✅ Tidak ada histori run yang bisa dihapus."
+          else
+            for id in $run_ids; do
+              gh run delete $id
+              echo "🗑️ Run ID $id berhasil dihapus."
+            done
+            echo "🔥 Semua bekas run lama telah dibersihkan!"
+          fi

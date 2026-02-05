@@ -34,7 +34,7 @@ jobs:
             echo "✅ Cache $cache_key dihapus."
           done
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
 
       - name: Done
         run: echo "🔥 Semua sampah artifact dan cache berhasil dibersihkan."

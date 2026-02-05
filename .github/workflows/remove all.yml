@@ -1,0 +1,40 @@
+name: Cleanup GitHub Actions Workspace
+
+on:
+  workflow_dispatch: # Jalankan manual kalau lu ngerasa repo udah penuh sampah
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+      - name: Cleanup Workflow Artifacts
+        shell: bash
+        run: |
+          echo "🧹 Menghapus semua artifact..."
+          artifacts=$(gh api -X GET /repos/${{ github.repository }}/actions/artifacts --paginate --jq '.artifacts[].id')
+          for art_id in $artifacts; do
+            gh api -X DELETE /repos/${{ github.repository }}/actions/artifacts/$art_id
+            echo "✅ Artifact $art_id dihapus."
+          done
+
+      - name: Cleanup Workflow Caches
+        shell: bash
+        run: |
+          echo "🧹 Menghapus semua cache..."
+          gh extension install actions/gh-actions-cache || true
+          
+          # Ambil daftar cache dan hapus satu per satu
+          caches=$(gh actions-cache list --repo ${{ github.repository }} | cut -f 1)
+          for cache_key in $caches; do
+            gh actions-cache delete $cache_key --repo ${{ github.repository }} --confirm
+            echo "✅ Cache $cache_key dihapus."
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Done
+        run: echo "🔥 Semua sampah artifact dan cache berhasil dibersihkan."

@@ -77,28 +77,14 @@ jobs:
         run: |
           cd gki/common
           echo "[6/12] Setup ReSukiSU & SUSFS (Manual Kingfinik98 Fork)"
-          
-          # 1. Clone directly from your updated Fork
-          git clone --depth 1 https://github.com/Kingfinik98/ReSukiSU.git KernelSU
-          echo " ReSukiSU Fork Cloned"
-          
-          # 2. Create a Symlink (as setup.sh does)
-          cd drivers
-          ln -sf ../KernelSU/kernel kernelsu
-          echo " Symlink Created"
-          cd ..
-          
-          # 3. Edit Makefile manual without stup.sh ResukiSu support unoficiall manager 
-          if ! grep -q "kernelsu" Makefile; then
-            echo "obj-\$(CONFIG_KSU) += kernelsu/" >> Makefile
-            echo " Modified Makefile"
-          fi
+          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
           
           # 4. Edit Kconfig (Manual)
           if ! grep -q "drivers/kernelsu/Kconfig" Kconfig; then
             sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" Kconfig
             echo " Modified Kconfig"
           fi
+          
           # 5. Setup SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
           rm -rf sus/.git
@@ -125,32 +111,25 @@ jobs:
           
           sed -i 's/check_defconfig//' build.config.gki
 
-      - name: Replace 300Hz with 500Hz
-        working-directory: gki/common
-        run: |
-          KCONFIG_HZ="kernel/Kconfig.hz"
-          sed -i 's/config HZ_300/config HZ_399/g' "$KCONFIG_HZ"
-          sed -i 's/bool "300 HZ"/bool "399 HZ"/g' "$KCONFIG_HZ"
-          sed -i 's/default 300 if HZ_300/default 399 if HZ_399/g' "$KCONFIG_HZ"
+      
           
       - name: Clean Build Config Line
         run: sed -i '2d' gki/common/build.config.gki
 
-      # --- Configure Kernel (NO KSU/SUSFS) ---
       - name: Configure Kernel
         working-directory: gki/common
         run: |
           TARGET_CONFIG="arch/arm64/configs/gki_defconfig"
           
-          echo "🧹 Sanitizing defconfig before injection..."
-          sed -i '/CONFIG_STACKPROTECTOR_PER_TASK/d' $TARGET_CONFIG
-          sed -i '/CONFIG_HZ_/d' $TARGET_CONFIG
-          sed -i '/CONFIG_BPF_JIT/d' $TARGET_CONFIG
-          sed -i '/CONFIG_KSU/d' $TARGET_CONFIG
-          sed -i '/CONFIG_NO_HZ/d' $TARGET_CONFIG
-          sed -i '/CONFIG_PREEMPT/d' $TARGET_CONFIG
-          sed -i '/CONFIG_MQ/d' $TARGET_CONFIG
-          
+          echo "🧹 Sanitizing defconfig with precision..."
+          # Gunakan regex yang lebih ketat agar tidak salah hapus
+          for SYMBOL in CONFIG_STACKPROTECTOR_PER_TASK CONFIG_HZ_ CONFIG_BPF_JIT \
+                         CONFIG_KSU CONFIG_NO_HZ CONFIG_PREEMPT CONFIG_MQ \
+                         CONFIG_TCP_CONG CONFIG_CPU_FREQ_GOV_CONSERVATIVE \
+                         CONFIG_BPF_SYSCALL CONFIG_MEMCG CONFIG_BFQ_GROUP_IOSCHED \
+                         CONFIG_KPROBES CONFIG_PSI; do
+                         sed -i "/^${SYMBOL}/d" $TARGET_CONFIG
+          done          
           echo "⚙️ Injecting Configuration..."
           cat >> $TARGET_CONFIG <<EOF
           CONFIG_KSU_MULTI_MANAGER_SUPPORT=y
@@ -182,7 +161,7 @@ jobs:
           CONFIG_PREEMPT=y
           CONFIG_PREEMPT_COUNT=y
           CONFIG_PREEMPTION=y
-          CONFIG_HZ_399=y
+          CONFIG_HZ_300=y
           CONFIG_NO_HZ=y
           CONFIG_PSI=y
           CONFIG_MEMCG=y
@@ -230,7 +209,7 @@ jobs:
           sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
           echo "-$CLEAN_NAME" > localversion
 
-      - name: Setup Compiler (Clang 12)
+      - name: Setup Compiler (Clang 17)
         working-directory: gki
         run: |
           mkdir -p prebuilts-master/clang/host/linux-x86
